@@ -1,0 +1,43 @@
+#!/bin/sh
+# WLAN-Waechter fuer den RTL8723BS (r8723bs, staging) im PocketCHIP.
+#
+# Problem: Beim Wechsel zwischen mehreren Access Points mit gleicher SSID
+# (Mesh/Repeater) bleibt der Treiber haengen. wpa_supplicant meldet dann
+# endlos "Association request to the driver failed" und das Geraet bleibt
+# offline, bis es neu gestartet wird.
+#
+# Loesung: Ist das WLAN nicht verbunden und tritt der Fehler gehaeuft auf,
+# wird der Treiber neu geladen.
+set -u
+
+INTERVAL="${WIFI_WATCHDOG_INTERVAL:-60}"   # Pruefintervall in Sekunden
+WINDOW="${WIFI_WATCHDOG_WINDOW:-3min}"     # Zeitfenster fuer Fehlermeldungen
+THRESHOLD="${WIFI_WATCHDOG_THRESHOLD:-3}"  # Mindestanzahl Fehlermeldungen
+COOLDOWN="${WIFI_WATCHDOG_COOLDOWN:-300}"  # Mindestabstand zwischen Neuladungen
+last_reload=0
+
+log() { echo "pocketchip-wifi-watchdog: $*"; }
+
+reload_driver() {
+  log "Treiber haengt ($1 Fehler in $WINDOW) - lade r8723bs neu"
+  nmcli radio wifi off
+  sleep 2
+  modprobe -r r8723bs
+  sleep 2
+  modprobe r8723bs
+  sleep 3
+  nmcli radio wifi on
+  last_reload=$(date +%s)
+}
+
+while sleep "$INTERVAL"; do
+  [ "$(nmcli -t -f WIFI general 2>/dev/null)" = enabled ] || continue
+  state="$(nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: '$1=="wlan0"{print $2}')"
+  [ "$state" = connected ] && continue
+  fails="$(journalctl -q -u wpa_supplicant --since "-$WINDOW" 2>/dev/null \
+            | grep -c 'Association request to the driver failed')"
+  now=$(date +%s)
+  if [ "$fails" -ge "$THRESHOLD" ] && [ $((now - last_reload)) -ge "$COOLDOWN" ]; then
+    reload_driver "$fails"
+  fi
+done

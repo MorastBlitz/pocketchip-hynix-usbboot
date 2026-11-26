@@ -13,5 +13,7 @@
 | Touch in der Mitte richtig, außen immer weiter daneben | Skalierungsfehler → [05](05-touch-calibration.md) |
 | `tca8418_keypad … error: -6` im Log | CHIP steckt nicht im PocketCHIP (Tastatur fehlt) |
 | `sudo: fdisk: command not found` | Debian hat fdisk nicht vorinstalliert; Partition über `/sys/block/sda/sda1/{start,size}` oder `lsblk` |
-| PocketCHIP per SSH plötzlich nicht erreichbar | Akku leer/aus oder WLAN getrennt |
+| PocketCHIP per SSH plötzlich nicht erreichbar | WLAN-Treiber hängt nach AP-Wechsel (`Association request to the driver failed`) → [08](08-optimization.md#wlan-stabilisieren); sonst Akku leer |
+| Kurzer Druck auf Power-Taste tut nichts | PocketTRIX setzt `HandlePowerKey=ignore` → [08](08-optimization.md#power-taste-sauber-herunterfahren) |
+| `apt autoremove` will openbox löschen | Ghostscript/poppler-data wurden entfernt → wieder installieren, nie pauschal autoremove |
 | Gar nichts startet mehr | FEL-Pin an GND → FEL-Modus ist immer erreichbar → per FEL starten oder Bootloader neu schreiben |

@@ -59,12 +59,14 @@ Ausführlich – bitte vorher lesen:
 | [05 Touch-Kalibrierung](docs/05-touch-calibration.md) | 9-Punkt-Kalibrierung mit Rohwerten |
 | [06 Betrieb & Wartung](docs/06-maintenance.md) | SSH, Stick sichern/klonen, Akku, Reparatur |
 | [07 Fehlersuche](docs/07-troubleshooting.md) | Probleme, die unterwegs aufgetreten sind |
+| [08 Optimierung](docs/08-optimization.md) | Aufräumen, WLAN-Stabilität, Power-Taste |
 
 ## Verzeichnisse
 
 ```
 scripts/        Hilfsskripte (macOS)
 uboot-script/   U-Boot-Skript, das der NTC-U-Boot beim Flashen ausfuehrt
+rootfs/         Dateien fuer den PocketCHIP (WLAN-Waechter, Power-Taste)
 checksums/      SHA256 der NTC-Dateien
 docs/           Dokumentation
 firmware/       (nicht im Repo) heruntergeladene/extrahierte Binaerdateien
