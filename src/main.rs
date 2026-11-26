@@ -1,6 +1,7 @@
 mod bt;
 mod debug;
 mod hw;
+mod led;
 mod settings;
 mod sys;
 mod timecfg;
@@ -258,6 +259,8 @@ impl App {
                     adjust("standby", "STANDBY NACH", &fmt_timeout(s.standby_timeout)),
                     toggle("standby_bat", "STANDBY NUR AKKU", s.standby_on_battery_only, true),
                     toggle("scanlines", "SCANLINES", s.scanlines, true),
+                    toggle("led_on", "LED IM BETRIEB", s.led_on, true),
+                    row("led_standby", "LED IM STANDBY", if s.led_standby_blink { "BLINKEN" } else { "AUS" }, 1, true),
                     action("screen_now", "DISPLAY JETZT AUS", ""),
                     action("touchcal", "TOUCH KALIBRIEREN", ""),
                 ]
@@ -722,6 +725,15 @@ impl App {
                 self.settings.standby_on_battery_only = !self.settings.standby_on_battery_only;
                 self.settings.save();
             }
+            (Page::Display, "led_on") => {
+                self.settings.led_on = !self.settings.led_on;
+                self.apply_led();
+                self.settings.save();
+            }
+            (Page::Display, "led_standby") => {
+                self.settings.led_standby_blink = !self.settings.led_standby_blink;
+                self.settings.save();
+            }
             (Page::Display, "scanlines") => {
                 self.settings.scanlines = !self.settings.scanlines;
                 self.be().set_scanlines(self.settings.scanlines);
@@ -958,8 +970,20 @@ impl App {
         self.be().set_input_open(false);
         self.screen_set(false);
         sys::cpu_cap(true);
+        self.apply_led();
         // ignore the key press that confirmed the dialog
         self.suspending_until = mono_ms() + 800;
+    }
+
+    fn apply_led(&self) {
+        let mode = if self.standby {
+            if self.settings.led_standby_blink { led::Mode::Blink } else { led::Mode::Off }
+        } else if self.settings.led_on {
+            led::Mode::Normal
+        } else {
+            led::Mode::Off
+        };
+        led::apply(mode);
     }
 
     fn wake_standby(&mut self) {
@@ -968,6 +992,7 @@ impl App {
         }
         self.standby = false;
         sys::cpu_cap(false);
+        self.apply_led();
         hw::LAST_ACTIVITY.store(mono_ms(), Ordering::Relaxed);
         self.screen_set(true);
         self.message("ZURÜCK AUS STANDBY", 3);
@@ -1238,6 +1263,7 @@ fn main() {
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {
+        a.apply_led();
         a.cpu.sample();
         a.refresh();
         a.tick();
@@ -1265,5 +1291,7 @@ fn main() {
 
     ui.run().expect("event loop failed");
     sys::cpu_cap(false);
+    // leave the LEDs in their normal state for the desktop
+    led::apply(led::Mode::Normal);
     APP.with(|a| *a.borrow_mut() = None);
 }

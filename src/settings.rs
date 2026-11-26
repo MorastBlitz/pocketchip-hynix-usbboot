@@ -12,6 +12,8 @@ pub struct Settings {
     pub standby_timeout: u32,
     pub standby_on_battery_only: bool,
     pub scanlines: bool,
+    pub led_on: bool,
+    pub led_standby_blink: bool,
 }
 
 impl Default for Settings {
@@ -22,6 +24,8 @@ impl Default for Settings {
             standby_timeout: 600,
             standby_on_battery_only: true,
             scanlines: true,
+            led_on: true,
+            led_standby_blink: true,
         }
     }
 }
@@ -43,6 +47,8 @@ impl Settings {
                 "standby_timeout" => s.standby_timeout = v.parse().unwrap_or(s.standby_timeout),
                 "standby_on_battery_only" => s.standby_on_battery_only = v == "1",
                 "scanlines" => s.scanlines = v == "1",
+                "led_on" => s.led_on = v == "1",
+                "led_standby_blink" => s.led_standby_blink = v == "1",
                 _ => {}
             }
         }
@@ -56,6 +62,8 @@ impl Settings {
         m.insert("standby_timeout", self.standby_timeout.to_string());
         m.insert("standby_on_battery_only", (self.standby_on_battery_only as u8).to_string());
         m.insert("scanlines", (self.scanlines as u8).to_string());
+        m.insert("led_on", (self.led_on as u8).to_string());
+        m.insert("led_standby_blink", (self.led_standby_blink as u8).to_string());
         let text: String = m.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
         let p = path();
         if let Some(dir) = std::path::Path::new(&p).parent() {

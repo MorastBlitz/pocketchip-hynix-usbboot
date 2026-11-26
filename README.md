@@ -8,8 +8,8 @@ Software-Renderer direkt auf DRM/KMS (kein X11 nötig), libinput für Touch und 
 
 - **01 SYSTEMSTATUS**: Host, Modell, Kernel, CPU, Takt, Auslastung, Load, RAM, Swap, Speicher, Uptime, IP, Temperaturen
 - **02 AKKU**: AXP209 Ladung, Status, Spannung, Strom, Leistung, Zustand, USB/AC-Eingang
-- **03 ENERGIE**: Ausschalten, Neustart, Standby, jeweils mit Sicherheitsabfrage
-- **04 ANZEIGE**: Helligkeit, Display-Timeout, Standby-Timeout (optional nur im Akkubetrieb), Scanlines, Display aus, **Touch-Kalibrierung**
+- **03 ENERGIE**: Ausschalten, Neustart, Standby, jeweils mit Sicherheitsabfrage. Standby ist ein leichter Standby (Display aus, CPU gedrosselt), weil s2idle auf dem R8 nicht wieder aufwacht
+- **04 ANZEIGE**: Helligkeit, Display-Timeout, Standby-Timeout (optional nur im Akkubetrieb), Scanlines, LED im Betrieb an/aus, LED-Blinken im Standby, Display aus, **Touch-Kalibrierung**
 - **05 WLAN** (nmcli): Funk an/aus, Netze suchen, verbinden (Passwort mit Anzeigen-Knopf), trennen, Passwort ändern, vergessen
 - **06 BLUETOOTH** (bluetoothctl): Dienst, an/aus, suchen, koppeln, verbinden, trennen, entfernen
 - **07 DATUM / ZEIT** (timedatectl): NTP, Zeitzone, manuelles Stellen
