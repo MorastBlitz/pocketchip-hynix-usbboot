@@ -327,9 +327,11 @@ impl App {
         } else {
             self.wifi.ssid.clone().unwrap_or_else(|| "GETRENNT".into())
         };
-        let bt = if !self.bt.adapter {
+        let bt = if !self.bt.service {
+            "DIENST AUS"
+        } else if !self.bt.adapter {
             "KEIN ADAPTER"
-        } else if self.bt.powered {
+        } else if self.bt.powered && !self.bt.blocked {
             "AN"
         } else {
             "AUS"
@@ -443,11 +445,13 @@ impl App {
         if b.service && !b.adapter {
             v.push(info("ADAPTER", "NICHT GEFUNDEN"));
         }
-        v.push(toggle("bt_power", "BLUETOOTH", b.powered, b.adapter && self.bt_busy.is_none()));
+        let on = b.powered && !b.blocked;
+        // stays selectable while busy so the cursor does not jump away
+        v.push(toggle("bt_power", "BLUETOOTH", on, b.adapter));
         if b.adapter {
             v.push(info("NAME", &b.name));
         }
-        v.push(row("bt_scan", "GERÄTE SUCHEN", self.bt_busy.as_deref().unwrap_or(""), 0, b.powered && self.bt_busy.is_none()));
+        v.push(row("bt_scan", "GERÄTE SUCHEN", self.bt_busy.as_deref().unwrap_or(""), 0, on && self.bt_busy.is_none()));
         v.push(sep(&format!("GERÄTE ({})", self.bt_devs.len())));
         for (i, d) in self.bt_devs.iter().enumerate() {
             let st = if d.connected { "VERBUNDEN" } else if d.paired { "GEKOPPELT" } else { "" };
@@ -845,7 +849,10 @@ impl App {
                 });
             }
             (Page::Bt, "bt_power") => {
-                let on = !self.bt.powered;
+                if self.bt_busy.is_some() {
+                    return;
+                }
+                let on = !(self.bt.powered && !self.bt.blocked);
                 self.bt_busy = Some(if on { "SCHALTE EIN ..." } else { "SCHALTE AUS ..." }.into());
                 self.refresh();
                 bg(move || bt::set_power(on), |a, r| {
@@ -1266,6 +1273,9 @@ impl App {
         }
         if self.tick_n % 5 == 0 && self.page() == Page::Time {
             self.poll_time();
+        }
+        if self.tick_n % 10 == 0 && self.page() != Page::Bt && self.bt_busy.is_none() {
+            self.poll_bt(false);
         }
         if self.tick_n % 5 == 0 && self.page() == Page::Bt && self.bt_busy.is_none() {
             self.poll_bt(true);

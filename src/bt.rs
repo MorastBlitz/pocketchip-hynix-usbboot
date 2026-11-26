@@ -8,6 +8,8 @@ pub struct BtState {
     pub service: bool,
     pub adapter: bool,
     pub powered: bool,
+    /// soft-blocked via rfkill (switched off in the console, survives reboots)
+    pub blocked: bool,
     pub name: String,
 }
 
@@ -35,6 +37,7 @@ pub fn state() -> BtState {
         return st;
     }
     st.adapter = true;
+    st.blocked = rfkill_blocked();
     for l in out.lines() {
         let l = l.trim();
         if let Some(v) = l.strip_prefix("Powered:") {
@@ -51,13 +54,57 @@ pub fn start_service() -> Result<(), String> {
     if ok { Ok(()) } else { Err(short_err(&err)) }
 }
 
+/// sysfs dirs of all Bluetooth rfkill switches (looked up by type: the
+/// index changes when the driver is re-probed).
+fn rfkill_dirs() -> Vec<String> {
+    let Ok(dir) = std::fs::read_dir("/sys/class/rfkill") else { return Vec::new() };
+    dir.flatten()
+        .map(|e| e.path().display().to_string())
+        .filter(|p| crate::util::read_trim(&format!("{p}/type")).as_deref() == Some("bluetooth"))
+        .collect()
+}
+
+pub fn rfkill_blocked() -> bool {
+    rfkill_dirs().iter().any(|p| crate::util::read_trim(&format!("{p}/soft")).as_deref() == Some("1"))
+}
+
+/// Soft-block or unblock Bluetooth. systemd-rfkill restores this state at
+/// boot (BlueZ AutoEnable would otherwise power the controller on again);
+/// its state file is written right away too, so a hard power loss keeps it.
+fn rfkill_set(block: bool) {
+    let v = if block { "1" } else { "0" };
+    for p in rfkill_dirs() {
+        crate::util::write_str(&format!("{p}/soft"), v);
+    }
+    if let Ok(dir) = std::fs::read_dir("/var/lib/systemd/rfkill") {
+        for e in dir.flatten() {
+            if e.file_name().to_string_lossy().ends_with(":bluetooth") {
+                let _ = std::fs::write(e.path(), format!("{v}\n"));
+            }
+        }
+    }
+}
+
 pub fn set_power(on: bool) -> Result<(), String> {
     if on {
+        rfkill_set(false);
         start_service()?;
-        let _ = run("rfkill", &["unblock", "bluetooth"]);
+        // the controller needs a moment after the unblock
+        let mut last = String::new();
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let (ok, out, err) = ctl(&["power", "on"], 10);
+            if ok && !out.contains("Failed") {
+                return Ok(());
+            }
+            last = if err.is_empty() { out } else { err };
+        }
+        Err(short_err(&last))
+    } else {
+        let _ = ctl(&["power", "off"], 10);
+        rfkill_set(true);
+        Ok(())
     }
-    let (ok, out, err) = ctl(&["power", if on { "on" } else { "off" }], 10);
-    if ok && !out.contains("Failed") { Ok(()) } else { Err(short_err(if err.is_empty() { &out } else { &err })) }
 }
 
 fn list(filter: Option<&str>) -> Vec<(String, String)> {
