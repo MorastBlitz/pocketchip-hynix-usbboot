@@ -98,6 +98,7 @@ struct App {
     restore_sel: bool,
     calib: Vec<(f64, f64)>,
     calib_result: Option<[f64; 6]>,
+    standby: bool,
 }
 
 thread_local! {
@@ -367,14 +368,17 @@ impl App {
         }
         v.push(sep("EINGANG"));
         v.push(info(
-            "USB",
+            "USB-EINGANG",
             &if b.usb_online {
                 format!("JA {:.2} V {} MA", b.usb_voltage_uv as f64 / 1e6, b.usb_current_ua / 1000)
             } else {
                 "NEIN".into()
             },
         ));
-        v.push(info("NETZTEIL (AC)", if b.ac_online { "JA" } else { "NEIN" }));
+        // ACIN is not wired on the PocketCHIP; only show it when it carries power
+        if b.ac_online {
+            v.push(info("DC-EINGANG (ACIN)", "JA"));
+        }
         v
     }
 
@@ -584,7 +588,7 @@ impl App {
             ),
             (Page::Power, "poweroff") => self.confirm("poweroff", "AUSSCHALTEN", "SYSTEM JETZT AUSSCHALTEN?"),
             (Page::Power, "reboot") => self.confirm("reboot", "NEUSTART", "SYSTEM JETZT NEU STARTEN?"),
-            (Page::Power, "suspend") => self.confirm("suspend", "STANDBY", "IN STANDBY GEHEN? AUFWECKEN MIT DER POWER-TASTE."),
+            (Page::Power, "suspend") => self.confirm("suspend", "STANDBY", "IN STANDBY GEHEN? DISPLAY AUS, CPU GEDROSSELT. AUFWECKEN MIT TASTE, TOUCH ODER POWER-TASTE."),
             (Page::Display, "screen_now") => self.screen_set(false),
             (Page::Display, "touchcal") => self.calib_start(),
             (Page::Display, _) => self.adjust(id, 1),
@@ -942,20 +946,35 @@ impl App {
         }
     }
 
+    /// Light standby: kernel s2idle does not resume on this board, so the
+    /// console only blanks the display and caps the CPU clock. Any key, touch
+    /// or the power key wakes it at once.
     fn suspend(&mut self) {
-        let now = mono_ms();
-        self.suspending_until = now + 20_000;
-        self.message("STANDBY ...", 5);
-        self.last_suspended = util::suspended_ms();
-        bg(|| util::run("systemctl", &["suspend"]), |a, (ok, _, e)| {
-            if !ok {
-                a.suspending_until = 0;
-                a.message(&format!("FEHLER: {}", util::short_err(&e)), 6);
-            }
-        });
+        if self.standby {
+            return;
+        }
+        self.standby = true;
+        self.be().set_dialog_open(false);
+        self.be().set_input_open(false);
+        self.screen_set(false);
+        sys::cpu_cap(true);
+        // ignore the key press that confirmed the dialog
+        self.suspending_until = mono_ms() + 800;
     }
 
-    /// Called after the system came back from suspend.
+    fn wake_standby(&mut self) {
+        if !self.standby {
+            return;
+        }
+        self.standby = false;
+        sys::cpu_cap(false);
+        hw::LAST_ACTIVITY.store(mono_ms(), Ordering::Relaxed);
+        self.screen_set(true);
+        self.message("ZURÜCK AUS STANDBY", 3);
+        self.poll_wifi();
+    }
+
+    /// Called after the system came back from a real suspend.
     fn resumed(&mut self) {
         let now = mono_ms();
         self.suspending_until = 0;
@@ -1060,7 +1079,12 @@ impl App {
         match ev {
             hw::InputEvent::TouchRaw(x, y) => self.calib_sample(x, y),
             hw::InputEvent::Activity => {
-                if self.screen_off && now > self.suspending_until {
+                if now <= self.suspending_until {
+                    return;
+                }
+                if self.standby {
+                    self.wake_standby();
+                } else if self.screen_off {
                     self.screen_set(true);
                 }
             }
@@ -1069,6 +1093,10 @@ impl App {
                     return;
                 }
                 hw::LAST_ACTIVITY.store(now, Ordering::Relaxed);
+                if self.standby {
+                    self.wake_standby();
+                    return;
+                }
                 if self.screen_off {
                     self.screen_set(true);
                     return;
@@ -1131,7 +1159,7 @@ impl App {
         }
         let sb = self.settings.standby_timeout as u64;
         let allowed = !(self.settings.standby_on_battery_only && self.bat.external_power());
-        if sb > 0 && idle >= sb && allowed && now > self.suspending_until {
+        if sb > 0 && idle >= sb && allowed && !self.standby && now > self.suspending_until {
             self.suspend();
         }
 
@@ -1206,6 +1234,7 @@ fn main() {
         restore_sel: true,
         calib: Vec::new(),
         calib_result: None,
+        standby: false,
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {
@@ -1235,5 +1264,6 @@ fn main() {
     timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), || with_app(|a| a.tick()));
 
     ui.run().expect("event loop failed");
+    sys::cpu_cap(false);
     APP.with(|a| *a.borrow_mut() = None);
 }

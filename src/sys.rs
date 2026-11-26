@@ -247,3 +247,23 @@ impl Backlight {
         }
     }
 }
+
+// ---- cpu clock cap for light standby ------------------------------------
+
+const CPUFREQ: &str = "/sys/devices/system/cpu/cpu0/cpufreq";
+
+pub fn cpu_cap(on: bool) {
+    let freqs: Vec<i64> = read_trim(&format!("{CPUFREQ}/scaling_available_frequencies"))
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|v| v.parse().ok())
+        .collect();
+    let target = if on {
+        freqs.iter().min().copied().or_else(|| read_i64(&format!("{CPUFREQ}/cpuinfo_min_freq")))
+    } else {
+        freqs.iter().max().copied().or_else(|| read_i64(&format!("{CPUFREQ}/cpuinfo_max_freq")))
+    };
+    if let Some(f) = target {
+        write_str(&format!("{CPUFREQ}/scaling_max_freq"), &f.to_string());
+    }
+}
