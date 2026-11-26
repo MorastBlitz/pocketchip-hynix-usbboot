@@ -53,7 +53,7 @@ Das Gerät bleibt offline bis zum Neustart. Abhilfe ([Dateien unter `rootfs/`](.
 |---|---|
 | `/etc/modprobe.d/r8723bs.conf` | `rtw_power_mgnt=0 rtw_ips_mode=0` – Stromsparen im Treiber aus |
 | `/etc/NetworkManager/conf.d/wifi-powersave-off.conf` | `wifi.powersave = 2` – Stromsparen in NetworkManager aus |
-| `/etc/NetworkManager/conf.d/wifi-no-scan-rand-mac.conf` | `wifi.scan-rand-mac-address=no` – keine Zufalls-MAC beim Scannen; direkt vor dem Hänger stand jedes Mal `set-hw-addr: … not successfully set (scanning)` |
+| `/etc/NetworkManager/conf.d/wifi-no-scan-rand-mac.conf` | Keine Zufalls-MAC: `wifi.scan-rand-mac-address=no` (Scannen) und `wifi.cloned-mac-address=permanent` (Verbindungen) – immer die Hardware-Adresse; direkt vor dem Hänger stand jedes Mal `set-hw-addr: … not successfully set (scanning)` |
 | `/usr/local/sbin/pocketchip-wifi-watchdog` + `pocketchip-wifi-watchdog.service` | Prüft jede Minute; ist `wlan0` nicht verbunden und meldet `wpa_supplicant` ≥ 3× „Association request to the driver failed“ oder „Authentication … timed out“ in 3 Minuten, wird der **Chip zurückgesetzt** (höchstens alle 5 Minuten) |
 
 **Reset statt Modul-Neuladen:** Nur `modprobe -r/modprobe r8723bs` reichte nicht –
