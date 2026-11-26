@@ -1,4 +1,4 @@
-# 08 – Optimierung: Aufräumen, WLAN, Power-Taste
+# 08 – Optimierung: Aufräumen, WLAN, Power-Taste, Startzeit
 
 Messungen auf dem getesteten Gerät (Debian 13, LXDE, nach dem Login):
 
@@ -77,3 +77,27 @@ HandlePowerKeyLongPress=ignore
 
 Jetzt fährt ein **kurzer Druck** Debian sauber herunter. Der lange Druck bleibt
 als Notaus erhalten.
+
+## Startzeit verkürzen
+
+| Maßnahme | Wirkung |
+|---|---|
+| `TIMEOUT 5` statt `30` in `/boot/extlinux/extlinux.conf` | Das Menü (nur über UART bedienbar) wartet 0,5 s statt 3 s |
+| `MODULES=dep` statt `most` in `/etc/initramfs-tools/initramfs.conf` | initramfs 10,5 statt 25,6 MB (42 statt 836 Module): U-Boot lädt weniger vom Stick, Root ist ~1 s früher eingehängt |
+| Oberfläche wartet nicht mehr auf NetworkManager | startet direkt nach logind |
+| Display-Treiber früh laden ([09](09-boot-logo.md)) | Logo nach ~10 s |
+
+Ergebnis auf dem getesteten Gerät: Oberfläche bei **33,7 s** statt 38,3 s
+Kernelzeit, zusätzlich ~2,5 s weniger in U-Boot. Mit `MODULES=dep` bestimmt
+`update-initramfs` die Module am laufenden System; der Splash-Hook ergänzt
+Display, Touch, Tastatur und Power-Taste. Vorher das große initramfs als
+Ersatzeintrag behalten:
+
+```sh
+sudo cp /boot/initrd.img-$(uname -r) /boot/initrd.img-$(uname -r).most
+# + LABEL most ... INITRD /boot/initrd.img-<version>.most in extlinux.conf
+```
+
+Der verbleibende Großteil ist systemd selbst auf dem 1-GHz-Einkern-R8
+(`basic.target` erst ~14 s nach dem Wechsel ins Root-Dateisystem) und die
+2 s Countdown in U-Boot (nur mit neu gebautem U-Boot im NAND änderbar).

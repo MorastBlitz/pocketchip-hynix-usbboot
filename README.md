@@ -59,7 +59,7 @@ Ausführlich – bitte vorher lesen:
 | [05 Touch-Kalibrierung](docs/05-touch-calibration.md) | 9-Punkt-Kalibrierung mit Rohwerten |
 | [06 Betrieb & Wartung](docs/06-maintenance.md) | SSH, Stick sichern/klonen, Akku, Reparatur |
 | [07 Fehlersuche](docs/07-troubleshooting.md) | Probleme, die unterwegs aufgetreten sind |
-| [08 Optimierung](docs/08-optimization.md) | Aufräumen, WLAN-Stabilität, Power-Taste |
+| [08 Optimierung](docs/08-optimization.md) | Aufräumen, WLAN-Stabilität, Power-Taste, Startzeit |
 | [09 Boot-Logo](docs/09-boot-logo.md) | Logo nach ~10 s statt 38 s schwarz, Taste zeigt Startmeldungen |
 
 ## Verzeichnisse

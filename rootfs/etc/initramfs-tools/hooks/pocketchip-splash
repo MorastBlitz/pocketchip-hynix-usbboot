@@ -8,7 +8,7 @@ case "$1" in prereqs) prereqs; exit 0 ;; esac
 
 for m in i2c_mv64xxx axp20x_i2c axp20x_regulator pwm_sun4i pwm_bl \
          panel_simple sun4i_tcon sun4i_backend sun4i_frontend sun4i_drm \
-         sun4i_ts axp20x_pek; do
+         sun4i_ts axp20x_pek tca8418_keypad matrix_keymap; do
 	manual_add_modules "$m"
 done
 
