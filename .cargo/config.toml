@@ -1,0 +1,7 @@
+[build]
+
+[env]
+# Linker search path for libinput/libudev/libxkbcommon copied from the device.
+PKG_CONFIG_ALLOW_CROSS = "1"
+PKG_CONFIG_PATH_armv7_unknown_linux_gnueabihf = { value = "sysroot/pkgconfig", relative = true }
+PKG_CONFIG_SYSROOT_DIR_armv7_unknown_linux_gnueabihf = "/"

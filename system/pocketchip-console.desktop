@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PocketCHIP Konsole
+Name[en]=PocketCHIP Console
+Comment=Zur Touch-Konsole zurueckkehren (beendet den Desktop)
+Exec=/usr/local/bin/pocketchip-console-start
+Icon=utilities-terminal
+Terminal=false
+Categories=System;Settings;
