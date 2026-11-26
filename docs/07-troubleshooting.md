@@ -16,4 +16,6 @@
 | PocketCHIP per SSH plötzlich nicht erreichbar | WLAN-Treiber hängt nach AP-Wechsel (`Association request to the driver failed`) → [08](08-optimization.md#wlan-stabilisieren); sonst Akku leer |
 | Kurzer Druck auf Power-Taste tut nichts | PocketTRIX setzt `HandlePowerKey=ignore` → [08](08-optimization.md#power-taste-sauber-herunterfahren) |
 | `apt autoremove` will openbox löschen | Ghostscript/poppler-data wurden entfernt → wieder installieren, nie pauschal autoremove |
+| Display beim Start ~38 s schwarz | Display-Treiber erst am Ende geladen → [09](09-boot-logo.md) (`sun4i_backend` ins initramfs, `fw_devlink=permissive`) |
+| Nach Splash-Einbau startet die Oberfläche nicht | `Conflicts=` zwischen Splash und Oberfläche → Drop-in statt Conflicts ([09](09-boot-logo.md#stolpersteine)) |
 | Gar nichts startet mehr | FEL-Pin an GND → FEL-Modus ist immer erreichbar → per FEL starten oder Bootloader neu schreiben |

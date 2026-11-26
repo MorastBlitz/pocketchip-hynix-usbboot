@@ -1,0 +1,18 @@
+#!/bin/sh
+# Display-Treiber und Boot-Logo ins initramfs, damit das Logo schon
+# ~10 s nach dem Einschalten statt erst nach ~38 s erscheint.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0 ;; esac
+. /usr/share/initramfs-tools/hook-functions
+
+for m in i2c_mv64xxx axp20x_i2c axp20x_regulator pwm_sun4i pwm_bl \
+         panel_simple sun4i_tcon sun4i_backend sun4i_frontend sun4i_drm \
+         sun4i_ts axp20x_pek; do
+	manual_add_modules "$m"
+done
+
+if [ -r /usr/share/pocketchip/splash.fb ]; then
+	mkdir -p "$DESTDIR/usr/share/pocketchip"
+	cp /usr/share/pocketchip/splash.fb "$DESTDIR/usr/share/pocketchip/"
+fi

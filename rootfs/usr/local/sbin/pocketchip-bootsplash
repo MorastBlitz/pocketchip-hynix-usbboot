@@ -1,0 +1,56 @@
+#!/bin/sh
+# Haelt das Boot-Logo auf /dev/fb0, bis die Konsolen-Oberflaeche startet
+# (deren Drop-in beendet diesen Dienst). Ein Tastendruck oder eine Beruehrung
+# schaltet tty1 auf die Startmeldungen (journalctl -f) um.
+# Bewusst /bin/sh statt Python: startet beim Booten unter Last sofort.
+SPLASH=/usr/share/pocketchip/splash.fb
+FLAG=/run/pocketchip-bootsplash.input
+EARLY=/run/pocketchip-bootsplash.early   # vom initramfs (init-top/pocketchip-splash)
+rm -f "$FLAG"
+watched=" "
+DEBUG=${POCKETCHIP_BOOTSPLASH_DEBUG:-0}
+
+# Liest Ereignisse (struct input_event, 16 Byte auf 32-Bit-ARM) und loest erst
+# bei einem echten Druck aus: type=EV_KEY(1), value=1. Ereignisse, die schon
+# vor dem Start anstanden, werden durch die erste Sekunde Wartezeit ignoriert.
+watch_input() {
+	dev=$1 n=0 t0=$(date +%s)
+	# Geraet einmal offen halten: bei jedem neuen open() gingen die
+	# restlichen Ereignisse eines Tastendrucks (EV_KEY nach MSC_SCAN) verloren
+	exec 3<"$dev" || return 0
+	while :; do
+		# shellcheck disable=SC2046
+		set -- $(dd bs=16 count=1 <&3 2>/dev/null | od -An -v -tu2)
+		[ $# -eq 8 ] || return 0
+		n=$((n + 1))
+		[ "$DEBUG" = 1 ] && [ "$n" -le 30 ] && echo "$dev type=$5 code=$6 value=$7" >&2
+		if [ "$5" = 1 ] && [ "$7" = 1 ] && [ $(($(date +%s) - t0)) -ge 1 ]; then
+			echo "Druck auf $dev (code $6)" >&2
+			: >"$FLAG"
+			return 0
+		fi
+	done
+}
+
+while [ ! -e "$FLAG" ] && [ ! -s "$EARLY" ]; do
+	for dev in /dev/input/event*; do
+		[ -c "$dev" ] || continue
+		case "$watched" in
+		*" $dev "*) ;;
+		*)
+			watched="$watched$dev "
+			watch_input "$dev" &
+			echo "Eingabe $dev wird beobachtet" >&2
+			;;
+		esac
+	done
+	# gleiche Pixel erneut schreiben flackert nicht, stellt das Logo aber
+	# wieder her, falls die Textkonsole es geloescht hat
+	[ -c /dev/fb0 ] && cat "$SPLASH" >/dev/fb0 2>/dev/null
+	sleep 0.5
+done
+
+echo "Taste/Touch erkannt -> Startmeldungen auf tty1" >&2
+printf '\033c' >/dev/tty1
+SYSTEMD_COLORS=0 exec journalctl -b -f -n 100 --no-pager --no-hostname \
+	-o short-monotonic >/dev/tty1 2>/dev/null

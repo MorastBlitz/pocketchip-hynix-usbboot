@@ -1,0 +1,53 @@
+#!/bin/sh
+# Boot-Logo und fruehe Tastenueberwachung im initramfs.
+# - zeichnet das Logo, sobald der Display-Treiber /dev/fb0 anlegt (~10 s nach
+#   dem Einschalten; braucht fw_devlink=permissive, siehe docs/09)
+# - beobachtet Tastatur/Touch; ein echter Druck wird in
+#   /run/pocketchip-bootsplash.early vermerkt. Die Datei ist vor dem Wechsel
+#   ins Root-Dateisystem geoeffnet und bleibt ueber den Umzug von /run
+#   erreichbar; pocketchip-bootsplash.service wertet sie aus.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0 ;; esac
+
+SPLASH=/usr/share/pocketchip/splash.fb
+EARLY=/run/pocketchip-bootsplash.early
+[ -r "$SPLASH" ] || exit 0
+
+watch_input() {
+	exec 3<"$1" || return 0
+	while :; do
+		# shellcheck disable=SC2046
+		set -- $(dd bs=16 count=1 <&3 2>/dev/null | od -An -v -tu2)
+		[ $# -eq 8 ] || return 0
+		if [ "$5" = 1 ] && [ "$7" = 1 ]; then  # EV_KEY, gedrueckt
+			echo 1 >&4
+			return 0
+		fi
+	done
+}
+
+: >"$EARLY"
+(
+	exec 4>>"$EARLY"
+	painted=0 watched=" " n=0 i=0
+	while [ "$i" -lt 400 ]; do              # hoechstens ~20 s
+		if [ "$painted" = 0 ] && [ -c /dev/fb0 ]; then
+			sleep 0.2
+			cat "$SPLASH" >/dev/fb0 2>/dev/null
+			painted=1
+		fi
+		for dev in /dev/input/event*; do
+			[ -c "$dev" ] || continue
+			case "$watched" in
+			*" $dev "*) ;;
+			*) watched="$watched$dev "; n=$((n + 1)); watch_input "$dev" & ;;
+			esac
+		done
+		# Tastatur, Touch, Power-Taste
+		[ "$painted" = 1 ] && [ "$n" -ge 3 ] && exit 0
+		i=$((i + 1))
+		sleep 0.05
+	done
+) &
+exit 0

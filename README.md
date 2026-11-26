@@ -60,13 +60,14 @@ Ausführlich – bitte vorher lesen:
 | [06 Betrieb & Wartung](docs/06-maintenance.md) | SSH, Stick sichern/klonen, Akku, Reparatur |
 | [07 Fehlersuche](docs/07-troubleshooting.md) | Probleme, die unterwegs aufgetreten sind |
 | [08 Optimierung](docs/08-optimization.md) | Aufräumen, WLAN-Stabilität, Power-Taste |
+| [09 Boot-Logo](docs/09-boot-logo.md) | Logo nach ~10 s statt 38 s schwarz, Taste zeigt Startmeldungen |
 
 ## Verzeichnisse
 
 ```
 scripts/        Hilfsskripte (macOS)
 uboot-script/   U-Boot-Skript, das der NTC-U-Boot beim Flashen ausfuehrt
-rootfs/         Dateien fuer den PocketCHIP (WLAN-Waechter, Power-Taste)
+rootfs/         Dateien fuer den PocketCHIP (WLAN-Waechter, Power-Taste, Boot-Logo)
 checksums/      SHA256 der NTC-Dateien
 docs/           Dokumentation
 firmware/       (nicht im Repo) heruntergeladene/extrahierte Binaerdateien

@@ -1,0 +1,16 @@
+[Unit]
+Description=PocketCHIP Boot-Logo (Taste/Touch zeigt Startmeldungen)
+DefaultDependencies=no
+# frueh starten; ein Zuruecksetzen der Konsole wird jede Sekunde uebermalt
+Before=shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/usr/share/pocketchip/splash.fb
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/pocketchip-bootsplash
+# journalctl -f endet bei SIGTERM mit Status 1
+SuccessExitStatus=1
+
+[Install]
+WantedBy=sysinit.target
