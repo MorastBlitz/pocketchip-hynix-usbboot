@@ -87,7 +87,15 @@ pub fn devices() -> Vec<Device> {
             mac,
         })
         .collect();
-    v.sort_by(|a, b| b.connected.cmp(&a.connected).then(b.paired.cmp(&a.paired)).then(a.name.cmp(&b.name)));
+    // connected, paired, then devices with a real name; bare addresses last
+    let named = |d: &Device| d.name != d.mac;
+    v.sort_by(|a, b| {
+        b.connected
+            .cmp(&a.connected)
+            .then(b.paired.cmp(&a.paired))
+            .then(named(b).cmp(&named(a)))
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
     v
 }
 
@@ -108,14 +116,82 @@ fn check(r: (bool, String, String)) -> Result<(), String> {
     }
 }
 
+fn info_flag(mac: &str, key: &str) -> bool {
+    let (_, out, _) = ctl(&["info", mac], 5);
+    out.lines().any(|l| l.trim() == format!("{key}: yes"))
+}
+
+/// Pair inside one interactive bluetoothctl session with a NoInputNoOutput
+/// agent ("just works"; a phone asks for confirmation on its side), wait for
+/// the result, then trust and connect. Success is checked with `info`.
 pub fn pair(mac: &str) -> Result<(), String> {
-    check(ctl(&["--agent", "NoInputNoOutput", "pair", mac], 40))?;
-    let _ = ctl(&["trust", mac], 5);
-    check(ctl(&["connect", mac], 20))
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    let mut child = Command::new("bluetoothctl")
+        .env("LC_ALL", "C")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| short_err(&e.to_string()))?;
+    let mut stdin = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let send = |stdin: &mut std::process::ChildStdin, c: &str| {
+        let _ = writeln!(stdin, "{c}");
+        let _ = stdin.flush();
+    };
+    send(&mut stdin, "agent NoInputNoOutput");
+    send(&mut stdin, "default-agent");
+    std::thread::sleep(Duration::from_millis(500));
+    send(&mut stdin, &format!("pair {mac}"));
+    let start = Instant::now();
+    let mut result: Option<Result<(), String>> = None;
+    while start.elapsed() < Duration::from_secs(45) && result.is_none() {
+        let Ok(line) = rx.recv_timeout(Duration::from_millis(500)) else { continue };
+        let l = line.to_lowercase();
+        if l.contains("pairing successful") || l.contains("alreadyexists") {
+            result = Some(Ok(()));
+        } else if l.contains("failed to pair") || l.contains("authenticationfailed") || l.contains("authenticationcanceled") || l.contains("not available") {
+            let msg = line.split("org.bluez.Error.").nth(1).unwrap_or(&line).to_string();
+            result = Some(Err(short_err(&format!("KOPPELN FEHLGESCHLAGEN: {msg}"))));
+        }
+    }
+    if result.as_ref().map(|r| r.is_ok()).unwrap_or(false) {
+        send(&mut stdin, &format!("trust {mac}"));
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    send(&mut stdin, "quit");
+    let _ = child.wait();
+    match result {
+        Some(Err(e)) => return Err(e),
+        None => return Err("KOPPELN: ZEITÜBERSCHREITUNG".into()),
+        Some(Ok(())) => {}
+    }
+    if !info_flag(mac, "Paired") {
+        return Err("KOPPELN NICHT BESTÄTIGT".into());
+    }
+    // pairing alone is useful (e.g. a phone); connecting needs a profile
+    match connect(mac) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(format!("GEKOPPELT, ABER NICHT VERBUNDEN: {e}")),
+    }
 }
 
 pub fn connect(mac: &str) -> Result<(), String> {
-    check(ctl(&["connect", mac], 20))
+    check(ctl(&["connect", mac], 20))?;
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    if info_flag(mac, "Connected") { Ok(()) } else { Err("VERBINDUNG ABGEBROCHEN".into()) }
 }
 
 pub fn disconnect(mac: &str) -> Result<(), String> {
@@ -124,4 +200,77 @@ pub fn disconnect(mac: &str) -> Result<(), String> {
 
 pub fn remove(mac: &str) -> Result<(), String> {
     check(ctl(&["remove", mac], 10))
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DevInfo {
+    pub mac: String,
+    pub name: String,
+    pub icon: String,
+    pub paired: bool,
+    pub bonded: bool,
+    pub trusted: bool,
+    pub connected: bool,
+    pub blocked: bool,
+    pub rssi: Option<i32>,
+    pub battery: Option<i32>,
+    pub services: Vec<String>,
+    pub known: bool,
+}
+
+fn paren_num(v: &str) -> Option<i32> {
+    v.split('(').nth(1)?.trim_end_matches(')').trim().parse().ok()
+}
+
+pub fn info(mac: &str) -> DevInfo {
+    let (_, out, _) = ctl(&["info", mac], 5);
+    let mut d = DevInfo { mac: mac.to_string(), ..Default::default() };
+    for l in out.lines() {
+        let l = l.trim();
+        if l.starts_with("Device ") {
+            d.known = true;
+        }
+        let Some((k, v)) = l.split_once(':') else { continue };
+        let v = v.trim();
+        match k {
+            "Name" => d.name = v.to_string(),
+            "Alias" if d.name.is_empty() => d.name = v.to_string(),
+            "Icon" => d.icon = v.to_string(),
+            "Paired" => d.paired = v == "yes",
+            "Bonded" => d.bonded = v == "yes",
+            "Trusted" => d.trusted = v == "yes",
+            "Connected" => d.connected = v == "yes",
+            "Blocked" => d.blocked = v == "yes",
+            "RSSI" => d.rssi = paren_num(v).or_else(|| v.parse().ok()),
+            "Battery Percentage" => d.battery = paren_num(v),
+            "UUID" => {
+                let name = v.split('(').next().unwrap_or(v).trim();
+                if !name.is_empty() && !name.starts_with("Vendor specific") && !d.services.iter().any(|s| s == name) {
+                    d.services.push(name.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    if d.name.is_empty() {
+        d.name = mac.to_string();
+    }
+    d
+}
+
+pub fn icon_de(icon: &str) -> &'static str {
+    match icon {
+        "phone" => "TELEFON",
+        "computer" => "COMPUTER",
+        "audio-card" | "audio-headphones" | "audio-headset" => "AUDIO",
+        "input-keyboard" => "TASTATUR",
+        "input-mouse" => "MAUS",
+        "input-gaming" => "GAMEPAD",
+        "input-tablet" => "TABLET",
+        "printer" => "DRUCKER",
+        "camera-photo" | "camera-video" => "KAMERA",
+        "modem" | "network-wireless" => "NETZWERK",
+        "" => "UNBEKANNT",
+        _ => "SONSTIGES",
+    }
 }

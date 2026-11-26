@@ -1,0 +1,55 @@
+#!/bin/sh
+# Make the RTL8723BS Bluetooth usable after a warm reboot of the C.H.I.P.
+#
+# A warm reboot leaves the Bluetooth firmware loaded (the chip stays
+# powered). On the next probe the controller resets itself to ROM in the
+# middle of the kernel's setup ("Peer device has reset"); the kernel loads
+# the firmware again but never registers the adapter with the management
+# interface, so bluetoothd sees no controller.
+# (The 115200 baud config override in /lib/firmware/updates/rtl_bt keeps
+# the UART speed the same in ROM and firmware, otherwise the chip would not
+# answer at all after a warm reboot.)
+#
+# Fix: probe once, unbind right after the controller reset itself to ROM,
+# then probe again from a clean ROM state, like after a cold boot.
+set -u
+BT=serial0-0
+H5=/sys/bus/serial/drivers/hci_uart_h5
+log() { echo "pocketchip-bt-fix: $*"; }
+registered() { timeout 5 bluetoothctl list 2>/dev/null < /dev/null | grep -q '^Controller'; }
+
+for i in $(seq 1 40); do
+  [ -e /sys/class/bluetooth/hci0 ] && break
+  sleep 1
+done
+# give a normal setup time to finish
+for i in $(seq 1 15); do
+  registered && { log "controller registered"; exit 0; }
+  sleep 1
+done
+[ -e "$H5" ] || { log "hci_uart_h5 not loaded"; exit 1; }
+
+for attempt in 1 2 3; do
+  log "controller not registered, re-probing (attempt $attempt)"
+  start=$(dmesg | wc -l)
+  [ -e "$H5/$BT" ] && echo "$BT" > "$H5/unbind"
+  sleep 0.5
+  echo "$BT" > "$H5/bind"
+  reset=0
+  for i in $(seq 1 50); do
+    if dmesg | tail -n +"$((start + 1))" | grep -q "Peer device has reset"; then reset=1; break; fi
+    sleep 0.1
+  done
+  if [ "$reset" = 1 ]; then
+    # controller is in ROM now: stop before the firmware is loaded
+    echo "$BT" > "$H5/unbind"
+    sleep 1
+    echo "$BT" > "$H5/bind"
+  fi
+  for i in $(seq 1 20); do
+    registered && { log "controller registered"; exit 0; }
+    sleep 1
+  done
+done
+log "giving up"
+exit 1

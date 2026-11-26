@@ -1,0 +1,11 @@
+[Unit]
+Description=PocketCHIP: RTL8723BS Bluetooth nach Warmstart registrieren
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/pocketchip-bt-fix
+
+[Install]
+WantedBy=multi-user.target

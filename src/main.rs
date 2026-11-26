@@ -31,6 +31,7 @@ enum Page {
     Time,
     TzRegion,
     TzCity(String),
+    BtDevice(String),
 }
 
 impl Page {
@@ -46,6 +47,7 @@ impl Page {
             Page::Time => "DATUM / ZEIT".into(),
             Page::TzRegion => "ZEITZONE".into(),
             Page::TzCity(r) => format!("ZEITZONE / {}", r.to_uppercase()),
+            Page::BtDevice(_) => "BLUETOOTH / GERÄT".into(),
         }
     }
 }
@@ -86,6 +88,7 @@ struct App {
     bt: bt::BtState,
     bt_devs: Vec<bt::Device>,
     bt_busy: Option<String>,
+    bt_dev: Option<bt::DevInfo>,
     time: timecfg::TimeState,
     edit: timecfg::Local,
     zones: Vec<String>,
@@ -173,6 +176,10 @@ impl App {
                 self.scan_wifi(false);
             }
             Page::Bt => self.poll_bt(true),
+            Page::BtDevice(mac) => {
+                self.bt_dev = None;
+                self.poll_bt_dev(mac.clone());
+            }
             Page::Time => {
                 self.edit = timecfg::now();
                 self.poll_time();
@@ -267,6 +274,7 @@ impl App {
             }
             Page::Wifi => self.rows_wifi(),
             Page::Bt => self.rows_bt(),
+            Page::BtDevice(mac) => self.rows_bt_dev(mac),
             Page::Time => self.rows_time(),
             Page::TzRegion => {
                 let mut regions: Vec<String> = Vec::new();
@@ -433,6 +441,53 @@ impl App {
         v
     }
 
+    fn rows_bt_dev(&self, mac: &str) -> Vec<Row> {
+        let Some(d) = self.bt_dev.as_ref().filter(|d| d.mac == mac) else {
+            return vec![info("ADRESSE", mac), info("STATUS", "LESE ...")];
+        };
+        let yn = |b: bool| if b { "JA" } else { "NEIN" };
+        let free = self.bt_busy.is_none();
+        let mut v = vec![
+            info("NAME", &d.name),
+            info("ADRESSE", &d.mac),
+            info("TYP", bt::icon_de(&d.icon)),
+            info("GEKOPPELT", yn(d.paired)),
+            info("VERBUNDEN", yn(d.connected)),
+            info("VERTRAUT", yn(d.trusted)),
+        ];
+        if let Some(r) = d.rssi {
+            let q = ((r + 100) * 100 / 60).clamp(0, 100) as i64;
+            v.push(info("SIGNAL", &format!("{} {r} DBM", bar(q, 6))));
+        }
+        if let Some(b) = d.battery {
+            v.push(info("AKKU", &format!("{b}%")));
+        }
+        if d.blocked {
+            v.push(info("GESPERRT", "JA"));
+        }
+        v.push(sep("AKTIONEN"));
+        if let Some(b) = &self.bt_busy {
+            v.push(info("STATUS", b));
+        }
+        if d.connected {
+            v.push(row("bd_disconnect", "TRENNEN", "", 0, free));
+        } else if d.paired {
+            v.push(row("bd_connect", "VERBINDEN", "", 0, free));
+        } else {
+            v.push(row("bd_pair", "KOPPELN + VERBINDEN", "", 0, free));
+        }
+        if d.paired || d.trusted {
+            v.push(row("bd_remove", "ENTFERNEN", "", 0, free));
+        }
+        if !d.services.is_empty() {
+            v.push(sep(&format!("DIENSTE ({})", d.services.len())));
+            for svc in &d.services {
+                v.push(info("", &svc.to_uppercase()));
+            }
+        }
+        v
+    }
+
     fn rows_time(&self) -> Vec<Row> {
         let n = timecfg::now();
         let e = &self.edit;
@@ -530,6 +585,7 @@ impl App {
                     a.scan_wifi(false);
                 });
             }
+            ("dev", "yes") => self.bt_op("remove".to_string(), arg),
             ("dev", op) => self.bt_op(op.to_string(), arg),
             ("calib", "save") => {
                 let Some(m) = self.calib_result.take() else { return };
@@ -641,22 +697,15 @@ impl App {
             }
             (Page::Bt, n) if n.starts_with("dev:") => {
                 let Some(d) = n[4..].parse::<usize>().ok().and_then(|i| self.bt_devs.get(i).cloned()) else { return };
-                let id = format!("dev:{}", d.mac);
-                let text = format!("{}\n{}", d.mac, if d.connected { "VERBUNDEN" } else if d.paired { "GEKOPPELT" } else { "NICHT GEKOPPELT" });
-                let mut b: Vec<(&str, &str)> = Vec::new();
-                if d.connected {
-                    b.push(("TRENNEN", "disconnect"));
-                } else if d.paired {
-                    b.push(("VERBINDEN", "connect"));
-                } else {
-                    b.push(("KOPPELN + VERBINDEN", "pair"));
+                self.push(Page::BtDevice(d.mac));
+            }
+            (Page::BtDevice(mac), op) if op.starts_with("bd_") => {
+                let mac = mac.clone();
+                let name = self.bt_dev.as_ref().map(|d| d.name.clone()).unwrap_or_else(|| mac.clone());
+                match op {
+                    "bd_remove" => self.confirm(&format!("dev:{mac}"), "ENTFERNEN", &format!("{name} ENTFERNEN? DIE KOPPLUNG WIRD GELÖSCHT.")),
+                    _ => self.bt_op(op[3..].to_string(), mac),
                 }
-                if d.paired {
-                    b.push(("ENTFERNEN", "remove"));
-                }
-                b.push(("ABBRECHEN", "no"));
-                let last = b.len() as i32 - 1;
-                self.dialog(&id, &d.name, &text, &b, if d.connected { last } else { 0 });
             }
             (Page::Time, "ntp") => self.adjust(id, 1),
             (Page::Time, "tz") => self.push(Page::TzRegion),
@@ -895,6 +944,15 @@ impl App {
         );
     }
 
+    fn poll_bt_dev(&mut self, mac: String) {
+        bg(move || bt::info(&mac), |a, d| {
+            if a.page() == Page::BtDevice(d.mac.clone()) {
+                a.bt_dev = Some(d);
+                a.refresh();
+            }
+        });
+    }
+
     fn bt_op(&mut self, op: String, mac: String) {
         self.bt_busy = Some(match op.as_str() {
             "pair" => "KOPPLE ...",
@@ -912,13 +970,16 @@ impl App {
                 "remove" => bt::remove(&mac),
                 _ => Ok(()),
             },
-            |a, r| {
+            move |a, r| {
                 a.bt_busy = None;
                 match r {
                     Ok(()) => a.message("OK", 3),
-                    Err(e) => a.message(&format!("FEHLER: {e}"), 6),
+                    Err(e) => a.message(&format!("FEHLER: {e}"), 8),
                 }
                 a.poll_bt(true);
+                if let Page::BtDevice(m) = a.page() {
+                    a.poll_bt_dev(m);
+                }
             },
         );
     }
@@ -1169,8 +1230,13 @@ impl App {
         if self.tick_n % 5 == 0 && self.page() == Page::Time {
             self.poll_time();
         }
-        if self.tick_n % 30 == 0 && self.page() == Page::Bt {
-            self.poll_bt(false);
+        if self.tick_n % 5 == 0 && self.page() == Page::Bt && self.bt_busy.is_none() {
+            self.poll_bt(true);
+        }
+        if self.tick_n % 3 == 0 && self.bt_busy.is_none() {
+            if let Page::BtDevice(m) = self.page() {
+                self.poll_bt_dev(m);
+            }
         }
         if self.tick_n % 10 == 0 && self.page() == Page::Status {
             self.ips = sys::ip_addrs();
@@ -1246,6 +1312,7 @@ fn main() {
         bt: bt::BtState::default(),
         bt_devs: Vec::new(),
         bt_busy: None,
+        bt_dev: None,
         time: timecfg::TimeState::default(),
         edit: timecfg::now(),
         zones: Vec::new(),
