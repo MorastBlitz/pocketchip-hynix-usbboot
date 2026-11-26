@@ -28,6 +28,8 @@ cargo zigbuild --release --target armv7-unknown-linux-gnueabihf.2.41
 scripts/install.sh             # kopiert per SSH, richtet systemd-Dienst ein
 ```
 
+Tipp: Auf einem Netzlaufwerk `CARGO_TARGET_DIR=$HOME/.cache/pocketchip-console-target` setzen (die Skripte nutzen diesen Pfad als Vorgabe).
+
 Desktop-Vorschau: `cargo run --no-default-features --features desktop`.
 
 ## Aufbau auf dem Gerät
