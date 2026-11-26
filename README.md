@@ -6,6 +6,8 @@ Software-Renderer direkt auf DRM/KMS (kein X11 nötig), libinput für Touch und 
 
 ## Funktionen
 
+Startseite: Kachel ⚙ EINSTELLUNGEN (weitere Kacheln folgen). Darin:
+
 - **01 SYSTEMSTATUS**: Host, Modell, Kernel, CPU, Takt, Auslastung, Load, RAM, Swap, Speicher, Uptime, IP, Temperaturen
 - **02 AKKU**: AXP209 Ladung, Status, Spannung, Strom, Leistung, Zustand, USB/AC-Eingang
 - **03 ENERGIE**: Ausschalten, Neustart, Standby, jeweils mit Sicherheitsabfrage. Standby ist ein leichter Standby (Display aus, CPU gedrosselt), weil s2idle auf dem R8 nicht wieder aufwacht

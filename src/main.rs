@@ -22,6 +22,7 @@ slint::include_modules!();
 
 #[derive(Clone, Debug, PartialEq)]
 enum Page {
+    Home,
     Menu,
     Status,
     Battery,
@@ -39,7 +40,8 @@ enum Page {
 impl Page {
     fn title(&self) -> String {
         match self {
-            Page::Menu => "HAUPTMENÜ".into(),
+            Page::Home => "START".into(),
+            Page::Menu => "EINSTELLUNGEN".into(),
             Page::Status => "SYSTEMSTATUS".into(),
             Page::Battery => "AKKU / LADUNG".into(),
             Page::Power => "ENERGIE".into(),
@@ -140,7 +142,7 @@ impl App {
     }
 
     fn page(&self) -> Page {
-        self.stack.last().map(|p| p.0.clone()).unwrap_or(Page::Menu)
+        self.stack.last().map(|p| p.0.clone()).unwrap_or(Page::Home)
     }
 
     fn message(&mut self, text: &str, secs: u64) {
@@ -207,6 +209,7 @@ impl App {
         let be = ui.global::<Backend>();
         be.set_title(page.title().into());
         be.set_depth((self.stack.len() - 1) as i32);
+        be.set_home(page == Page::Home);
         if self.rows.row_count() == rows.len() {
             for (i, r) in rows.iter().enumerate() {
                 if self.rows.row_data(i).as_ref() != Some(r) {
@@ -250,6 +253,7 @@ impl App {
 
     fn build_rows(&self, page: &Page) -> Vec<Row> {
         match page {
+            Page::Home => vec![action("settings", "EINSTELLUNGEN", "")],
             Page::Menu => self.rows_menu(),
             Page::Status => self.rows_status(),
             Page::Battery => self.rows_battery(),
@@ -652,6 +656,7 @@ impl App {
     fn activate(&mut self, id: String) {
         let page = self.page();
         match (&page, id.as_str()) {
+            (Page::Home, "settings") => self.push(Page::Menu),
             (Page::Menu, "status") => self.push(Page::Status),
             (Page::Menu, "battery") => self.push(Page::Battery),
             (Page::Menu, "power") => self.push(Page::Power),
@@ -1347,7 +1352,7 @@ fn main() {
     let app = App {
         ui: ui.clone_strong(),
         rows,
-        stack: vec![(Page::Menu, 0)],
+        stack: vec![(Page::Home, 0)],
         settings,
         backlight,
         cpu: sys::CpuSampler::default(),
