@@ -1,3 +1,4 @@
+mod audio;
 mod bt;
 mod debug;
 mod hw;
@@ -26,6 +27,7 @@ enum Page {
     Battery,
     Power,
     Display,
+    Audio,
     Wifi,
     Bt,
     Time,
@@ -42,6 +44,7 @@ impl Page {
             Page::Battery => "AKKU / LADUNG".into(),
             Page::Power => "ENERGIE".into(),
             Page::Display => "ANZEIGE".into(),
+            Page::Audio => "AUDIO".into(),
             Page::Wifi => "WLAN".into(),
             Page::Bt => "BLUETOOTH".into(),
             Page::Time => "DATUM / ZEIT".into(),
@@ -272,6 +275,17 @@ impl App {
                     action("touchcal", "TOUCH KALIBRIEREN", ""),
                 ]
             }
+            Page::Audio => {
+                let s = &self.settings;
+                vec![
+                    adjust("vol", "LAUTSTÄRKE", &format!("{} {:>3}%", bar(s.volume, 10), s.volume)),
+                    toggle("mute", "STUMM", s.muted, true),
+                    action("tone", "TESTTON", ""),
+                    sep("HINWEIS"),
+                    info("AUSGANG", "KLINKE 3,5 MM"),
+                    info("LAUTSPRECHER", "NICHT EINGEBAUT"),
+                ]
+            }
             Page::Wifi => self.rows_wifi(),
             Page::Bt => self.rows_bt(),
             Page::BtDevice(mac) => self.rows_bt_dev(mac),
@@ -325,10 +339,11 @@ impl App {
             action("battery", "02 AKKU", &format!("{} {}", self.bat.short(), self.bat.status_de())),
             action("power", "03 ENERGIE", "AUS/NEU/STANDBY"),
             action("display", "04 ANZEIGE", &format!("HELL {}", self.settings.brightness)),
-            action("wifi", "05 WLAN", &wifi),
-            action("bt", "06 BLUETOOTH", bt),
-            action("time", "07 DATUM / ZEIT", &format!("{:02}.{:02}. {:02}:{:02}", now.day, now.month, now.hour, now.minute)),
-            action("desktop", "08 DESKTOP", "LXDE STARTEN"),
+            action("audio", "05 AUDIO", &if self.settings.muted { "STUMM".to_string() } else { format!("LAUT {}%", self.settings.volume) }),
+            action("wifi", "06 WLAN", &wifi),
+            action("bt", "07 BLUETOOTH", bt),
+            action("time", "08 DATUM / ZEIT", &format!("{:02}.{:02}. {:02}:{:02}", now.day, now.month, now.hour, now.minute)),
+            action("desktop", "09 DESKTOP", "LXDE STARTEN"),
         ]
     }
 
@@ -637,6 +652,16 @@ impl App {
             (Page::Menu, "battery") => self.push(Page::Battery),
             (Page::Menu, "power") => self.push(Page::Power),
             (Page::Menu, "display") => self.push(Page::Display),
+            (Page::Menu, "audio") => self.push(Page::Audio),
+            (Page::Audio, "tone") => {
+                if self.settings.muted || self.settings.volume == 0 {
+                    self.message("STUMM GESCHALTET", 3);
+                } else {
+                    audio::test_tone();
+                    self.message("TESTTON 440 HZ", 2);
+                }
+            }
+            (Page::Audio, _) => self.adjust(id, 1),
             (Page::Menu, "wifi") => self.push(Page::Wifi),
             (Page::Menu, "bt") => self.push(Page::Bt),
             (Page::Menu, "time") => self.push(Page::Time),
@@ -772,6 +797,18 @@ impl App {
             }
             (Page::Display, "standby_bat") => {
                 self.settings.standby_on_battery_only = !self.settings.standby_on_battery_only;
+                self.settings.save();
+            }
+            (Page::Audio, "vol") => {
+                self.settings.volume = (self.settings.volume + 5 * d as i64).clamp(0, 100);
+                let (v, m) = (self.settings.volume, self.settings.muted);
+                std::thread::spawn(move || audio::apply(v, m));
+                self.settings.save();
+            }
+            (Page::Audio, "mute") => {
+                self.settings.muted = !self.settings.muted;
+                let (v, m) = (self.settings.volume, self.settings.muted);
+                std::thread::spawn(move || audio::apply(v, m));
                 self.settings.save();
             }
             (Page::Display, "led_on") => {
@@ -1331,6 +1368,8 @@ fn main() {
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {
         a.apply_led();
+        let (v, m) = (a.settings.volume, a.settings.muted);
+        std::thread::spawn(move || audio::apply(v, m));
         a.cpu.sample();
         a.refresh();
         a.tick();

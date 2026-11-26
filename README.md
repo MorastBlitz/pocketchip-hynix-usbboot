@@ -10,10 +10,11 @@ Software-Renderer direkt auf DRM/KMS (kein X11 nötig), libinput für Touch und 
 - **02 AKKU**: AXP209 Ladung, Status, Spannung, Strom, Leistung, Zustand, USB/AC-Eingang
 - **03 ENERGIE**: Ausschalten, Neustart, Standby, jeweils mit Sicherheitsabfrage. Standby ist ein leichter Standby (Display aus, CPU gedrosselt), weil s2idle auf dem R8 nicht wieder aufwacht
 - **04 ANZEIGE**: Helligkeit, Display-Timeout, Standby-Timeout (optional nur im Akkubetrieb), Scanlines, LED im Betrieb an/aus, LED-Blinken im Standby, Display aus, **Touch-Kalibrierung**
-- **05 WLAN** (nmcli): Funk an/aus, Netze suchen, verbinden (Passwort mit Anzeigen-Knopf), trennen, Passwort ändern, vergessen
-- **06 BLUETOOTH** (bluetoothctl): Dienst, an/aus, suchen, koppeln, verbinden, trennen, entfernen
-- **07 DATUM / ZEIT** (timedatectl): NTP, Zeitzone, manuelles Stellen
-- **08 DESKTOP**: wechselt zu LXDE; zurück über Panel-Knopf, Desktop-Symbol oder Menü „PocketCHIP Konsole“
+- **05 AUDIO**: Lautstärke und Stumm für die 3,5-mm-Klinke (kein eingebauter Lautsprecher), Testton; wird beim Start gesetzt
+- **06 WLAN** (nmcli): Funk an/aus, Netze suchen, verbinden (Passwort mit Anzeigen-Knopf), trennen, Passwort ändern, vergessen
+- **07 BLUETOOTH** (bluetoothctl): an/aus, suchen, Detailseite je Gerät, koppeln, verbinden, trennen, entfernen. UART mit 115200 Baud (Override), damit BT auch nach Warmstarts geht; zu langsam für Audio
+- **08 DATUM / ZEIT** (timedatectl): NTP, Zeitzone, manuelles Stellen
+- **09 DESKTOP**: wechselt zu LXDE; zurück über Panel-Knopf, Desktop-Symbol oder Menü „PocketCHIP Konsole“
 - **Power-Taste** öffnet einen Ausschalt-Dialog (logind-Inhibitor, solange die Konsole läuft)
 
 Bedienung: Touch überall; Tastatur ↑↓ Auswahl, ◀▶ Wert ändern, Enter öffnen/umschalten, Esc zurück.

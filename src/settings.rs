@@ -14,6 +14,8 @@ pub struct Settings {
     pub scanlines: bool,
     pub led_on: bool,
     pub led_standby_blink: bool,
+    pub volume: i64,
+    pub muted: bool,
 }
 
 impl Default for Settings {
@@ -26,6 +28,8 @@ impl Default for Settings {
             scanlines: true,
             led_on: true,
             led_standby_blink: true,
+            volume: 60,
+            muted: false,
         }
     }
 }
@@ -49,6 +53,8 @@ impl Settings {
                 "scanlines" => s.scanlines = v == "1",
                 "led_on" => s.led_on = v == "1",
                 "led_standby_blink" => s.led_standby_blink = v == "1",
+                "volume" => s.volume = v.parse().unwrap_or(s.volume),
+                "muted" => s.muted = v == "1",
                 _ => {}
             }
         }
@@ -64,6 +70,8 @@ impl Settings {
         m.insert("scanlines", (self.scanlines as u8).to_string());
         m.insert("led_on", (self.led_on as u8).to_string());
         m.insert("led_standby_blink", (self.led_standby_blink as u8).to_string());
+        m.insert("volume", self.volume.to_string());
+        m.insert("muted", (self.muted as u8).to_string());
         let text: String = m.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
         let p = path();
         if let Some(dir) = std::path::Path::new(&p).parent() {
