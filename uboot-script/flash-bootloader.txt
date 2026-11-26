@@ -1,0 +1,18 @@
+echo "=== PocketCHIP Hynix-8G: Bootloader fuer USB-Start schreiben ==="
+nand info
+setenv ok_erase 0; setenv ok_spl 0; setenv ok_splb 0; setenv ok_ub 0; setenv ok_cmp 0
+echo "--- Loesche Boot-Bereich 0x0-0x1000000 (SPL, SPL-Backup, U-Boot, Env) ---"
+if nand erase 0x0 0x1000000; then setenv ok_erase 1; fi
+echo "--- Schreibe NTC-SPL (raw, BROM-Format) bei 0x0 ---"
+if nand write.raw.noverify 0x45000000 0x0 100; then setenv ok_spl 1; fi
+echo "--- Schreibe NTC-SPL-Backup bei 0x400000 ---"
+if nand write.raw.noverify 0x45000000 0x400000 100; then setenv ok_splb 1; fi
+echo "--- Schreibe U-Boot 2026.04 bei 0x800000 ---"
+if nand write 0x48000000 0x800000 0x400000; then setenv ok_ub 1; fi
+echo "--- Lese U-Boot zurueck und vergleiche ---"
+mw.b 0x4c000000 0x55 0x400000
+nand read 0x4c000000 0x800000 0x400000
+if cmp.b 0x48000000 0x4c000000 0x400000; then setenv ok_cmp 1; fi
+echo "=== ERGEBNIS: erase=${ok_erase} spl=${ok_spl} spl_backup=${ok_splb} uboot=${ok_ub} vergleich=${ok_cmp} ==="
+echo "=== FERTIG - CHIP kann ausgeschaltet werden ==="
+while true; do sleep 10; done

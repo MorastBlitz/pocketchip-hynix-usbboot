@@ -1,0 +1,8 @@
+firmware/
+tools/
+work/
+*.img
+*.img.zst
+*.zip
+*.log
+.DS_Store
