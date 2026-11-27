@@ -16,6 +16,10 @@ pub struct Settings {
     pub led_standby_blink: bool,
     pub volume: i64,
     pub muted: bool,
+    /// warn below this battery level (%), 0 = never
+    pub battery_warn: i64,
+    /// power off at or below this level (%), 0 = never
+    pub battery_off: i64,
 }
 
 impl Default for Settings {
@@ -30,6 +34,8 @@ impl Default for Settings {
             led_standby_blink: true,
             volume: 60,
             muted: false,
+            battery_warn: 10,
+            battery_off: 5,
         }
     }
 }
@@ -55,6 +61,8 @@ impl Settings {
                 "led_standby_blink" => s.led_standby_blink = v == "1",
                 "volume" => s.volume = v.parse().unwrap_or(s.volume),
                 "muted" => s.muted = v == "1",
+                "battery_warn" => s.battery_warn = v.parse().unwrap_or(s.battery_warn),
+                "battery_off" => s.battery_off = v.parse().unwrap_or(s.battery_off),
                 _ => {}
             }
         }
@@ -72,6 +80,8 @@ impl Settings {
         m.insert("led_standby_blink", (self.led_standby_blink as u8).to_string());
         m.insert("volume", self.volume.to_string());
         m.insert("muted", (self.muted as u8).to_string());
+        m.insert("battery_warn", self.battery_warn.to_string());
+        m.insert("battery_off", self.battery_off.to_string());
         let text: String = m.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
         let p = path();
         if let Some(dir) = std::path::Path::new(&p).parent() {
@@ -97,4 +107,11 @@ pub fn fmt_timeout(secs: u32) -> String {
         s if s < 3600 => format!("{} MIN", s / 60),
         s => format!("{} STD", s / 3600),
     }
+}
+
+pub const BATTERY_WARN_STEPS: &[u32] = &[0, 10, 15, 20, 25, 30];
+pub const BATTERY_OFF_STEPS: &[u32] = &[0, 3, 5, 7, 10];
+
+pub fn fmt_percent_or_never(v: i64) -> String {
+    if v <= 0 { "NIE".into() } else { format!("{v} %") }
 }

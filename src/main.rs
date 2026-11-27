@@ -10,7 +10,7 @@ mod touchcal;
 mod util;
 mod wifi;
 
-use settings::{fmt_timeout, step, Settings, SCREEN_STEPS, STANDBY_STEPS};
+use settings::{fmt_percent_or_never, fmt_timeout, step, Settings, BATTERY_OFF_STEPS, BATTERY_WARN_STEPS, SCREEN_STEPS, STANDBY_STEPS};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -117,6 +117,10 @@ struct App {
     calib: Vec<(f64, f64)>,
     calib_result: Option<[f64; 6]>,
     standby: bool,
+    /// low battery warning already shown for this discharge
+    bat_warned: bool,
+    /// seconds left before the low battery power-off (None = not armed)
+    bat_off_in: Option<u32>,
 }
 
 /// Exit code of the pause menu: 0 resume, 10 quit the emulator.
@@ -278,6 +282,9 @@ impl App {
                 action("poweroff", "AUSSCHALTEN", ""),
                 action("reboot", "NEUSTART", ""),
                 action("suspend", "STANDBY", ""),
+                sep("AKKU"),
+                adjust("bat_warn", "WARNUNG BEI", &fmt_percent_or_never(self.settings.battery_warn)),
+                adjust("bat_off", "AUSSCHALTEN BEI", &fmt_percent_or_never(self.settings.battery_off)),
                 sep("HINWEIS"),
                 info("POWER-TASTE", "ÖFFNET ABFRAGE"),
                 info("LANGER DRUCK 6 S", "HARTES AUS"),
@@ -647,6 +654,7 @@ impl App {
         match (kind, act.as_str()) {
             ("power", a) => self.do_power(a),
             ("poweroff", "yes") => self.do_power("poweroff"),
+            ("lowbat_off", "now") => self.do_power("poweroff"),
             ("reboot", "yes") => self.do_power("reboot"),
             ("suspend", "yes") => self.do_power("suspend"),
             ("quit_emu", "yes") => self.overlay_exit(EXIT_QUIT_EMU),
@@ -767,6 +775,7 @@ impl App {
             (Page::Menu, "wifi") => self.push(Page::Wifi),
             (Page::Menu, "bt") => self.push(Page::Bt),
             (Page::Menu, "time") => self.push(Page::Time),
+            (Page::Power, "bat_warn") | (Page::Power, "bat_off") => self.adjust(id, 1),
             (Page::Power, "poweroff") => self.confirm("poweroff", "AUSSCHALTEN", "SYSTEM JETZT AUSSCHALTEN?"),
             (Page::Power, "reboot") => self.confirm("reboot", "NEUSTART", "SYSTEM JETZT NEU STARTEN?"),
             (Page::Power, "suspend") => self.confirm("suspend", "STANDBY", "IN STANDBY GEHEN? DISPLAY AUS, CPU GEDROSSELT. AUFWECKEN MIT TASTE, TOUCH ODER POWER-TASTE."),
@@ -883,6 +892,21 @@ impl App {
             p => p,
         };
         match (&page, id.as_str()) {
+            (Page::Power, "bat_warn") => {
+                let v = step(BATTERY_WARN_STEPS, self.settings.battery_warn as u32, d) as i64;
+                // the warning must come before the power-off
+                if v == 0 || v > self.settings.battery_off {
+                    self.settings.battery_warn = v;
+                    self.settings.save();
+                }
+            }
+            (Page::Power, "bat_off") => {
+                let v = step(BATTERY_OFF_STEPS, self.settings.battery_off as u32, d) as i64;
+                if self.settings.battery_warn == 0 || v < self.settings.battery_warn {
+                    self.settings.battery_off = v;
+                    self.settings.save();
+                }
+            }
             (Page::Display, "bright") => {
                 self.settings.brightness = (self.settings.brightness + d as i64).clamp(1, self.backlight.max);
                 self.backlight.set(self.settings.brightness);
@@ -1347,6 +1371,67 @@ impl App {
         }
     }
 
+    /// Low battery: warn once per discharge, power off with a countdown.
+    /// pocketchip-battery-guard.service is the fallback when the console
+    /// is not running (e.g. during an emulator).
+    fn check_battery(&mut self) {
+        let b = &self.bat;
+        let on_battery = b.present && b.capacity >= 0 && !b.external_power() && !b.charging();
+        let cap = b.capacity;
+        let (warn, off) = (self.settings.battery_warn, self.settings.battery_off);
+        if !on_battery {
+            if self.bat_off_in.take().is_some() {
+                if self.be().get_dialog_id() == "lowbat_off" {
+                    self.be().set_dialog_open(false);
+                    self.ui.invoke_refocus();
+                }
+                self.message("LADEGERÄT ERKANNT, AUSSCHALTEN ABGEBROCHEN", 5);
+            }
+            self.bat_warned = false;
+            return;
+        }
+        if warn > 0 && cap > warn + 2 {
+            self.bat_warned = false;
+        }
+        if off > 0 && cap <= off {
+            let left = match self.bat_off_in {
+                None => 30,
+                Some(n) => n.saturating_sub(1),
+            };
+            self.bat_off_in = Some(left);
+            if left == 0 {
+                self.bat_off_in = None;
+                self.do_power("poweroff");
+                return;
+            }
+            self.wake_for_alert();
+            let text = format!("NOCH {cap} %. DAS SYSTEM FÄHRT IN {left} S HERUNTER. LADEGERÄT ANSCHLIESSEN ZUM ABBRECHEN.");
+            if self.be().get_dialog_open() && self.be().get_dialog_id() == "lowbat_off" {
+                self.be().set_dialog_text(text.into());
+            } else {
+                self.dialog("lowbat_off", "AKKU LEER", &text, &[("JETZT AUSSCHALTEN", "now")], 0);
+            }
+            return;
+        }
+        if warn > 0 && cap <= warn && !self.bat_warned {
+            self.bat_warned = true;
+            self.wake_for_alert();
+            let off_text = if off > 0 { format!(" BEI {off} % FÄHRT DAS SYSTEM HERUNTER.") } else { String::new() };
+            let text = format!("NOCH {cap} %. BITTE LADEGERÄT ANSCHLIESSEN.{off_text}");
+            self.dialog("lowbat", "AKKU SCHWACH", &text, &[("OK", "no")], 0);
+        }
+    }
+
+    /// Make an alert visible: leave standby / switch the display on.
+    fn wake_for_alert(&mut self) {
+        if self.standby {
+            self.wake_standby();
+        } else if self.screen_off {
+            self.screen_set(true);
+        }
+        hw::LAST_ACTIVITY.store(mono_ms(), Ordering::Relaxed);
+    }
+
     fn tick(&mut self) {
         self.tick_n += 1;
         let now = mono_ms();
@@ -1359,6 +1444,7 @@ impl App {
         }
         self.bat = sys::Battery::read();
         self.be().set_battery(self.bat.short().into());
+        self.check_battery();
         self.be().set_net(
             if !self.wifi.radio {
                 "WLAN AUS"
@@ -1482,6 +1568,8 @@ fn main() {
         calib: Vec::new(),
         calib_result: None,
         standby: false,
+        bat_warned: false,
+        bat_off_in: None,
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {

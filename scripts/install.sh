@@ -10,6 +10,7 @@ BIN="${CARGO_TARGET_DIR:-$HOME/.cache/pocketchip-console-target}/armv7-unknown-l
 ssh "$HOST" 'mkdir -p /tmp/pcc-install'
 scp -q "$BIN" "$ROOT/system/pocketchip-console.service" "$ROOT/system/90-pocketchip-touch-libinput.rules" \
     "$ROOT/system/pocketchip-bt-fix" "$ROOT/system/pocketchip-bt-fix.service" \
+    "$ROOT/system/pocketchip-battery-guard" "$ROOT/system/pocketchip-battery-guard.service" \
     "$ROOT/system/firmware/rtl8723bs_config.bin" \
     "$ROOT/system/pocketchip-emu@.service" "$ROOT/system/pocketchip-emu-helper.service" "$ROOT/system/pocketchip-emu-run" "$ROOT/system/pocketchip-emu-helper" \
     "$HOST:/tmp/pcc-install/"
@@ -28,6 +29,9 @@ sudo udevadm control --reload
 sudo install -D -m 0644 rtl8723bs_config.bin /lib/firmware/updates/rtl_bt/rtl8723bs_config.bin
 sudo install -m 0755 pocketchip-bt-fix /usr/local/sbin/
 sudo install -m 0644 pocketchip-bt-fix.service /etc/systemd/system/
+# low battery: power off even when the console is not running
+sudo install -m 0755 pocketchip-battery-guard /usr/local/sbin/
+sudo install -m 0644 pocketchip-battery-guard.service /etc/systemd/system/
 # emulators (EMULATOREN tile): full screen on DRM/KMS, console comes back on exit
 u="${POCKETCHIP_USER:-chip}"
 sudo install -d /usr/local/lib/pocketchip-console
@@ -43,6 +47,10 @@ if [ "$ENABLE" != "--no-enable" ]; then
   sudo systemctl disable getty@tty1.service 2>/dev/null || true
   sudo systemctl enable pocketchip-console.service
   sudo systemctl enable pocketchip-bt-fix.service
+  sudo systemctl enable pocketchip-battery-guard.service
+fi
+if [ "$ENABLE" != "--no-enable" ]; then
+  sudo systemctl restart pocketchip-battery-guard.service
 fi
 if systemctl is-active -q getty@tty1.service; then
   echo "Shell auf tty1 aktiv: Konsole nicht neu gestartet (systemctl start pocketchip-console)"

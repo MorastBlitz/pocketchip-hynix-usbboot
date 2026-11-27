@@ -14,7 +14,7 @@ Startseite: Kacheln ⚙ EINSTELLUNGEN und 🎮 EMULATOREN.
 
 - **01 SYSTEMSTATUS**: Host, Modell, Kernel, CPU, Takt, Auslastung, Load, RAM, Swap, Speicher, Uptime, IP, Temperaturen
 - **02 AKKU**: AXP209 Ladung, Status, Spannung, Strom, Leistung, Zustand, USB/AC-Eingang
-- **03 ENERGIE**: Ausschalten, Neustart, Standby, jeweils mit Sicherheitsabfrage. Standby ist ein leichter Standby (Display aus, CPU gedrosselt), weil s2idle auf dem R8 nicht wieder aufwacht
+- **03 ENERGIE**: Ausschalten, Neustart, Standby, jeweils mit Sicherheitsabfrage. Akku: Warnung bei 10 % (Display geht an), bei 5 % 30-s-Countdown und Ausschalten (Ladegerät bricht ab); beide Schwellen einstellbar. `pocketchip-battery-guard.service` fährt auch ohne laufende Konsole herunter (nach ca. 2 min unter der Schwelle). Standby ist ein leichter Standby (Display aus, CPU gedrosselt), weil s2idle auf dem R8 nicht wieder aufwacht
 - **04 ANZEIGE**: Helligkeit, Display-Timeout, Standby-Timeout (optional nur im Akkubetrieb), Scanlines, LED im Betrieb an/aus, LED-Blinken im Standby, Display aus, **Touch-Kalibrierung**
 - **05 AUDIO**: Lautstärke und Stumm für die 3,5-mm-Klinke (kein eingebauter Lautsprecher), Testton; wird beim Start gesetzt
 - **06 WLAN** (nmcli): Funk an/aus, Netze suchen, verbinden (Passwort mit Anzeigen-Knopf), trennen, Passwort ändern, vergessen
@@ -46,6 +46,7 @@ Desktop-Vorschau: `cargo run --no-default-features --features desktop`.
 | `/etc/systemd/system/pocketchip-console.service` | Dienst auf tty1, `Conflicts=getty@tty1` (Autologin-Shell nur bei Bedarf) |
 | `/etc/udev/rules.d/90-pocketchip-touch-libinput.rules` | Kalibriermatrix für libinput ohne X |
 | `/var/lib/pocketchip-console/settings.conf` | Einstellungen |
+| `/usr/local/sbin/pocketchip-battery-guard` | Fährt bei leerem Akku herunter, auch ohne Konsole |
 | `/etc/systemd/system/pocketchip-emu@.service` | Emulator auf tty1, `Conflicts=pocketchip-console`, startet die Konsole danach wieder |
 | `/usr/local/lib/pocketchip-console/pocketchip-emu-run` | Startet den Emulator, legt beim ersten Start `~/.config/scummvm/scummvm.ini` an |
 | `/etc/systemd/system/pocketchip-emu-helper.service` | Helfer, läuft nur zusammen mit einem Emulator, hält die Power-Taste (systemd-inhibit) |
