@@ -192,7 +192,7 @@ component HomeTile inherits Rectangle {
         x: (parent.width - self.width) / 2;
         width: 52px;
         height: 52px;
-        source: @image-url("../assets/gear.svg");
+        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : @image-url("../assets/gear.svg");
         colorize: root.selected || ta.pressed ? Theme.bg : Theme.fg;
     }
     Text {

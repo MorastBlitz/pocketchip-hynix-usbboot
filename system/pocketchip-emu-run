@@ -1,0 +1,46 @@
+#!/bin/sh
+# Start one emulator full screen on DRM/KMS. Called by pocketchip-emu@.service
+# as the normal user; the console comes back when this exits.
+set -e
+# the touch mouse of pocketchip-emu-helper must exist before SDL starts
+for i in $(seq 1 50); do
+    grep -q 'PocketCHIP Touch-Maus' /proc/bus/input/devices && break
+    sleep 0.1
+done
+case "$1" in
+scummvm)
+    games="$HOME/games/scummvm"
+    cfg="$HOME/.config/scummvm/scummvm.ini"
+    mkdir -p "$games" "$HOME/.config/scummvm" "$HOME/.local/share/scummvm/saves"
+    # first start: settings that suit 480x272 and the 1 GHz R8. OpenGL (lima)
+    # draws the menus at the full 480x272; the SDL surface mode only at 320x200.
+    if [ ! -e "$cfg" ]; then
+        cat > "$cfg" <<INI
+[scummvm]
+fullscreen=true
+gfx_mode=opengl
+scaler=normal
+scale_factor=1
+aspect_ratio=true
+filtering=false
+stretch_mode=fit
+vsync=true
+gui_theme=scummmodern
+gui_scale=100
+browser_lastpath=$games
+savepath=$HOME/.local/share/scummvm/saves
+confirm_exit=false
+pocketchip_cfg=2
+INI
+    fi
+    # update settings written by older versions of this script
+    if ! grep -q '^pocketchip_cfg=2' "$cfg"; then
+        sed -i -e 's/^gfx_mode=surfacesdl$/gfx_mode=opengl/' -e '/^\[scummvm\]$/a pocketchip_cfg=2' "$cfg"
+    fi
+    exec /usr/games/scummvm
+    ;;
+*)
+    echo "unbekannter Emulator: $1" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,30 @@
+[Unit]
+Description=PocketCHIP Emulator %i (Vollbild auf DRM/KMS, ohne X)
+Documentation=https://github.com/MorastBlitz/pocketchip-ui
+# The emulator takes tty1 and the display from the console (and from LXDE).
+# When it ends, ExecStopPost brings the console back.
+Conflicts=pocketchip-console.service getty@tty1.service
+After=pocketchip-console.service getty@tty1.service
+# touch as mouse, power key opens the pause menu
+Requires=pocketchip-emu-helper.service
+After=pocketchip-emu-helper.service
+
+[Service]
+Type=simple
+# install.sh replaces the user name with POCKETCHIP_USER
+User=chip
+# render: Mali-400 (lima) for EGL/GLES, which SDL kmsdrm uses for its window
+SupplementaryGroups=video render input audio
+WorkingDirectory=~
+# SDL2 without X: KMS/DRM for video, evdev for touch and keyboard, ALSA audio
+Environment=SDL_VIDEODRIVER=kmsdrm SDL_AUDIODRIVER=alsa
+ExecStart=/usr/local/lib/pocketchip-console/pocketchip-emu-run %i
+# "+" runs it as root
+ExecStopPost=+/bin/systemctl start --no-block pocketchip-console.service
+StandardInput=tty-force
+StandardOutput=journal
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TimeoutStopSec=15

@@ -14,7 +14,7 @@ use settings::{fmt_timeout, step, Settings, SCREEN_STEPS, STANDBY_STEPS};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
 use util::{bar, fmt_duration, mono_ms};
 
@@ -32,6 +32,9 @@ enum Page {
     Wifi,
     Bt,
     Time,
+    Emus,
+    /// Pause menu over a running emulator (`--overlay LABEL`).
+    Overlay(String),
     TzRegion,
     TzCity(String),
     BtDevice(String),
@@ -50,6 +53,8 @@ impl Page {
             Page::Wifi => "WLAN".into(),
             Page::Bt => "BLUETOOTH".into(),
             Page::Time => "DATUM / ZEIT".into(),
+            Page::Emus => "EMULATOREN".into(),
+            Page::Overlay(l) => format!("PAUSE / {l}"),
             Page::TzRegion => "ZEITZONE".into(),
             Page::TzCity(r) => format!("ZEITZONE / {}", r.to_uppercase()),
             Page::BtDevice(_) => "BLUETOOTH / GERÄT".into(),
@@ -77,6 +82,10 @@ fn info(label: &str, value: &str) -> Row {
 fn sep(label: &str) -> Row {
     row("", label, "", 4, false)
 }
+
+/// Emulators started full screen by pocketchip-emu@<id>.service:
+/// (id, label, program that must be installed, games folder under $HOME).
+const EMUS: &[(&str, &str, &str, &str)] = &[("scummvm", "SCUMMVM", "/usr/games/scummvm", "~/games/scummvm")];
 
 struct App {
     ui: AppWindow,
@@ -109,6 +118,10 @@ struct App {
     calib_result: Option<[f64; 6]>,
     standby: bool,
 }
+
+/// Exit code of the pause menu: 0 resume, 10 quit the emulator.
+static EXIT_CODE: AtomicI32 = AtomicI32::new(0);
+const EXIT_QUIT_EMU: i32 = 10;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -171,6 +184,8 @@ impl App {
             self.stack.pop();
             self.restore_sel = true;
             self.refresh();
+        } else if self.overlay().is_some() {
+            self.overlay_exit(0);
         }
     }
 
@@ -253,7 +268,9 @@ impl App {
 
     fn build_rows(&self, page: &Page) -> Vec<Row> {
         match page {
-            Page::Home => vec![action("settings", "EINSTELLUNGEN", "")],
+            Page::Home => vec![action("settings", "EINSTELLUNGEN", ""), action("emus", "EMULATOREN", "")],
+            Page::Emus => self.rows_emus(),
+            Page::Overlay(l) => self.rows_overlay(l),
             Page::Menu => self.rows_menu(),
             Page::Status => self.rows_status(),
             Page::Battery => self.rows_battery(),
@@ -351,6 +368,66 @@ impl App {
             action("time", "08 DATUM / ZEIT", &format!("{:02}.{:02}. {:02}:{:02}", now.day, now.month, now.hour, now.minute)),
             action("desktop", "09 DESKTOP", "LXDE STARTEN"),
         ]
+    }
+
+    fn rows_emus(&self) -> Vec<Row> {
+        let mut v = Vec::new();
+        for (id, label, prog, games) in EMUS {
+            let ok = std::path::Path::new(prog).exists();
+            v.push(row(&format!("emu:{id}"), label, if ok { "STARTEN" } else { "NICHT INSTALLIERT" }, 0, ok));
+            v.push(info("  SPIELE", games));
+        }
+        v.push(sep("BEDIENUNG"));
+        v.push(info("BEENDEN", "STRG+Q"));
+        v.push(info("SCUMMVM-MENÜ", "STRG+F5"));
+        v
+    }
+
+    fn rows_overlay(&self, label: &str) -> Vec<Row> {
+        let s = sys::SysInfo::read();
+        let st = &self.settings;
+        let now = timecfg::now();
+        let wifi = if !self.wifi.radio {
+            "AUS".to_string()
+        } else {
+            self.wifi.ssid.clone().unwrap_or_else(|| "GETRENNT".into())
+        };
+        let mut v = vec![
+            action("resume", "WEITER SPIELEN", ""),
+            action("quit_emu", &format!("{label} BEENDEN"), ""),
+            sep("STATUS"),
+            info("AKKU", &format!("{} {}", self.bat.short(), self.bat.status_de())),
+            info("UHRZEIT", &format!("{:02}.{:02}.{} {:02}:{:02}", now.day, now.month, now.year, now.hour, now.minute)),
+            info("WLAN", &wifi),
+        ];
+        if let Some((_, ip)) = self.ips.first() {
+            v.push(info("IP", ip));
+        }
+        let temp = s.soc_temp.map(|t| format!("  {t:.0} °C")).unwrap_or_default();
+        v.push(info("CPU", &format!("{:.0}%{temp}", self.cpu.load)));
+        v.push(info("RAM", &format!("{} / {} MB", (s.mem_total_kb - s.mem_avail_kb) / 1024, s.mem_total_kb / 1024)));
+        v.push(sep("EINSTELLUNGEN"));
+        v.push(adjust("bright", "HELLIGKEIT", &format!("{} {:>2}", bar(st.brightness * 100 / self.backlight.max, 10), st.brightness)));
+        v.push(adjust("vol", "LAUTSTÄRKE", &format!("{} {:>3}%", bar(st.volume, 10), st.volume)));
+        v.push(toggle("mute", "STUMM", st.muted, true));
+        v.push(sep("ENERGIE"));
+        v.push(action("suspend", "STANDBY", ""));
+        v.push(action("reboot", "NEUSTART", ""));
+        v.push(action("poweroff", "AUSSCHALTEN", ""));
+        v
+    }
+
+    /// Leave the pause menu with an exit code for pocketchip-emu-helper.
+    fn overlay_exit(&mut self, code: i32) {
+        EXIT_CODE.store(code, Ordering::Relaxed);
+        let _ = slint::quit_event_loop();
+    }
+
+    fn overlay(&self) -> Option<String> {
+        match self.stack.first() {
+            Some((Page::Overlay(l), _)) => Some(l.clone()),
+            _ => None,
+        }
     }
 
     fn rows_status(&self) -> Vec<Row> {
@@ -573,6 +650,7 @@ impl App {
             ("poweroff", "yes") => self.do_power("poweroff"),
             ("reboot", "yes") => self.do_power("reboot"),
             ("suspend", "yes") => self.do_power("suspend"),
+            ("quit_emu", "yes") => self.overlay_exit(EXIT_QUIT_EMU),
             ("desktop", "yes") => {
                 self.message("STARTE DESKTOP ...", 30);
                 bg(|| util::run("systemctl", &["start", "--no-block", "getty@tty1.service"]), |a, (ok, _, err)| {
@@ -628,6 +706,19 @@ impl App {
         }
     }
 
+    /// Hand tty1 and the display to an emulator; its service stops the
+    /// console (Conflicts=) and starts it again when the emulator exits.
+    fn emu_start(&mut self, id: String) {
+        let label = EMUS.iter().find(|e| e.0 == id).map(|e| e.1).unwrap_or("EMULATOR");
+        self.message(&format!("STARTE {label} ..."), 30);
+        let unit = format!("pocketchip-emu@{id}.service");
+        bg(move || util::run("systemctl", &["start", "--no-block", &unit]), |a, (ok, _, err)| {
+            if !ok {
+                a.message(&format!("FEHLER: {}", util::short_err(&err)), 6);
+            }
+        });
+    }
+
     fn input(&mut self, id: &str, title: &str, prompt: &str, secret: bool) {
         let be = self.be();
         be.set_input_id(id.into());
@@ -657,6 +748,17 @@ impl App {
         let page = self.page();
         match (&page, id.as_str()) {
             (Page::Home, "settings") => self.push(Page::Menu),
+            (Page::Home, "emus") => self.push(Page::Emus),
+            (Page::Overlay(_), "resume") => self.overlay_exit(0),
+            (Page::Overlay(l), "quit_emu") => {
+                let text = format!("{l} BEENDEN? NICHT GESPEICHERTER SPIELSTAND GEHT VERLOREN.");
+                self.confirm("quit_emu", "BEENDEN", &text)
+            }
+            (Page::Overlay(_), "poweroff") => self.confirm("poweroff", "AUSSCHALTEN", "SYSTEM JETZT AUSSCHALTEN? NICHT GESPEICHERTER SPIELSTAND GEHT VERLOREN."),
+            (Page::Overlay(_), "reboot") => self.confirm("reboot", "NEUSTART", "SYSTEM JETZT NEU STARTEN? NICHT GESPEICHERTER SPIELSTAND GEHT VERLOREN."),
+            (Page::Overlay(_), "suspend") => self.do_power("suspend"),
+            (Page::Overlay(_), _) => self.adjust(id, 1),
+            (Page::Emus, e) if e.starts_with("emu:") => self.emu_start(e[4..].to_string()),
             (Page::Menu, "status") => self.push(Page::Status),
             (Page::Menu, "battery") => self.push(Page::Battery),
             (Page::Menu, "power") => self.push(Page::Power),
@@ -789,7 +891,11 @@ impl App {
     }
 
     fn adjust(&mut self, id: String, d: i32) {
-        let page = self.page();
+        let page = match self.page() {
+            Page::Overlay(_) if id == "bright" => Page::Display,
+            Page::Overlay(_) if id == "vol" || id == "mute" => Page::Audio,
+            p => p,
+        };
         match (&page, id.as_str()) {
             (Page::Display, "bright") => {
                 self.settings.brightness = (self.settings.brightness + d as i64).clamp(1, self.backlight.max);
@@ -1239,6 +1345,14 @@ impl App {
                 if self.be().get_input_open() {
                     self.be().set_input_open(false);
                 }
+                if self.overlay().is_some() {
+                    // the power key opened the pause menu; pressed again it resumes
+                    if self.be().get_dialog_open() {
+                        self.be().set_dialog_open(false);
+                    }
+                    self.overlay_exit(0);
+                    return;
+                }
                 if self.be().get_dialog_open() && self.be().get_dialog_id() == "power" {
                     return;
                 }
@@ -1308,7 +1422,7 @@ impl App {
 
         // pages with live values
         match self.page() {
-            Page::Menu | Page::Status | Page::Battery | Page::Time => {
+            Page::Menu | Page::Status | Page::Battery | Page::Time | Page::Overlay(_) => {
                 if !self.be().get_dialog_open() {
                     self.refresh()
                 }
@@ -1320,6 +1434,9 @@ impl App {
 
 fn main() {
     hw::install_signal_quit();
+    // pause menu over an emulator: started by pocketchip-emu-helper
+    let args: Vec<String> = std::env::args().collect();
+    let overlay = args.iter().position(|a| a == "--overlay").map(|i| args.get(i + 1).cloned().unwrap_or_else(|| "EMULATOR".into()).to_uppercase());
 
     #[cfg(feature = "kms")]
     if std::env::var_os("SLINT_BACKEND").is_none() {
@@ -1352,7 +1469,7 @@ fn main() {
     let app = App {
         ui: ui.clone_strong(),
         rows,
-        stack: vec![(Page::Home, 0)],
+        stack: vec![(overlay.clone().map(Page::Overlay).unwrap_or(Page::Home), 0)],
         settings,
         backlight,
         cpu: sys::CpuSampler::default(),
@@ -1391,6 +1508,11 @@ fn main() {
         a.poll_wifi();
         a.poll_bt(false);
         a.poll_time();
+        if a.overlay().is_some() {
+            a.ips = sys::ip_addrs();
+            // ignore the release of the power key that opened the menu
+            a.ignore_power_until = mono_ms() + 600;
+        }
     });
 
     hw::spawn_input_watcher(|ev| {
@@ -1415,4 +1537,7 @@ fn main() {
     // leave the LEDs in their normal state for the desktop
     led::apply(led::Mode::Normal);
     APP.with(|a| *a.borrow_mut() = None);
+    if overlay.is_some() {
+        std::process::exit(EXIT_CODE.load(Ordering::Relaxed));
+    }
 }

@@ -12,8 +12,9 @@ scp -q "$BIN" "$ROOT/system/pocketchip-console.service" "$ROOT/system/pocketchip
     "$ROOT/system/pocketchip-console.desktop" "$ROOT/system/90-pocketchip-touch-libinput.rules" \
     "$ROOT/system/pocketchip-bt-fix" "$ROOT/system/pocketchip-bt-fix.service" \
     "$ROOT/system/firmware/rtl8723bs_config.bin" \
+    "$ROOT/system/pocketchip-emu@.service" "$ROOT/system/pocketchip-emu-helper.service" "$ROOT/system/pocketchip-emu-run" "$ROOT/system/pocketchip-emu-helper" \
     "$HOST:/tmp/pcc-install/"
-ssh "$HOST" ENABLE="${1:-}" 'set -e; cd /tmp/pcc-install
+ssh "$HOST" ENABLE="${1:-}" POCKETCHIP_USER="${POCKETCHIP_USER:-}" 'set -e; cd /tmp/pcc-install
 sudo install -m 0755 pocketchip-console /usr/local/bin/pocketchip-console.new
 sudo mv /usr/local/bin/pocketchip-console.new /usr/local/bin/pocketchip-console
 sudo install -m 0755 pocketchip-console-start /usr/local/bin/
@@ -26,6 +27,15 @@ sudo udevadm control --reload
 sudo install -D -m 0644 rtl8723bs_config.bin /lib/firmware/updates/rtl_bt/rtl8723bs_config.bin
 sudo install -m 0755 pocketchip-bt-fix /usr/local/sbin/
 sudo install -m 0644 pocketchip-bt-fix.service /etc/systemd/system/
+# emulators (EMULATOREN tile): full screen on DRM/KMS, console comes back on exit
+u="${POCKETCHIP_USER:-chip}"
+sudo install -d /usr/local/lib/pocketchip-console
+sudo install -m 0755 pocketchip-emu-run pocketchip-emu-helper /usr/local/lib/pocketchip-console/
+sudo install -m 0644 pocketchip-emu-helper.service /etc/systemd/system/
+# replaced by pocketchip-emu-helper
+sudo rm -f /etc/systemd/system/pocketchip-emu-touch.service /usr/local/lib/pocketchip-console/pocketchip-emu-touch
+sed "s/^User=chip$/User=$u/" pocketchip-emu@.service | sudo tee /etc/systemd/system/pocketchip-emu@.service >/dev/null
+dpkg -s scummvm >/dev/null 2>&1 || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends scummvm
 # way back from LXDE: desktop icon and first button in the panel launchbar
 u="${POCKETCHIP_USER:-chip}"; h="$(getent passwd "$u" | cut -d: -f6)"
 if [ -n "$h" ]; then
