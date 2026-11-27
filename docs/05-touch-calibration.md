@@ -67,3 +67,9 @@ DISPLAY=:0 pocketchip-touch-calibrate apply
 Beide Stellen werden beim Start gelesen: Xorg (`40-pocketchip-touch.conf`) und
 das PocketTRIX-Skript `pocketchip-touch-calibrate` (`/etc/default/pocketchip-touch`).
 Nach einem Neustart geprüft – die Matrix bleibt erhalten.
+
+> **Ohne X** ([08](08-optimization.md#x-und-lxde-entfernen)) entfallen
+> `xinput`, die Xorg-Datei und `pocketchip-touch-calibrate`. Die Touch-Oberfläche
+> kalibriert unter ANZEIGE › Touch-Kalibrierung selbst. Sie schreibt die Matrix
+> nach `/etc/default/pocketchip-touch` (`POCKETCHIP_TOUCH_MATRIX`) und als
+> libinput-Regel nach `/etc/udev/rules.d/90-pocketchip-touch-libinput.rules`.

@@ -15,7 +15,8 @@
 | `sudo: fdisk: command not found` | Debian hat fdisk nicht vorinstalliert; Partition über `/sys/block/sda/sda1/{start,size}` oder `lsblk` |
 | PocketCHIP per SSH plötzlich nicht erreichbar | WLAN-Treiber hängt nach AP-Wechsel (`Association request to the driver failed`) → [08](08-optimization.md#wlan-stabilisieren); sonst Akku leer |
 | Kurzer Druck auf Power-Taste tut nichts | PocketTRIX setzt `HandlePowerKey=ignore` → [08](08-optimization.md#power-taste-sauber-herunterfahren) |
-| `apt autoremove` will openbox löschen | Ghostscript/poppler-data wurden entfernt → wieder installieren, nie pauschal autoremove |
+| `apt autoremove` will openbox löschen | Ghostscript/poppler-data wurden entfernt → wieder installieren, nie pauschal autoremove (nur relevant, solange LXDE installiert ist) |
+| Beim Entfernen von LXDE will apt lightdm, xscreensaver oder GNOME installieren | Nebenpakete `lxlock`, `nm-connection-editor`, `notification-daemon` mit entfernen, `--no-install-recommends` → [08](08-optimization.md#x-und-lxde-entfernen) |
 | Nach Treiber-Neuladen nur noch `Authentication … timed out` | Chip hängt weiter → SDIO-Controller neu binden (pwrseq-Reset), `pocketchip-wifi-watchdog --reset-now` ([08](08-optimization.md#wlan-stabilisieren)) |
 | Display beim Start ~38 s schwarz | Display-Treiber erst am Ende geladen → [09](09-boot-logo.md) (`sun4i_backend` ins initramfs, `fw_devlink=permissive`) |
 | Nach Splash-Einbau startet die Oberfläche nicht | `Conflicts=` zwischen Splash und Oberfläche → Drop-in statt Conflicts ([09](09-boot-logo.md#stolpersteine)) |

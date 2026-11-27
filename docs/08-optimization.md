@@ -12,7 +12,60 @@ Messungen auf dem getesteten Gerät (Debian 13, LXDE, nach dem Login):
 
 Größte Speicherverbraucher danach: Xorg (68 MB), lxsession (57 MB),
 lxpanel (30 MB), nm-applet (24 MB), pcmanfm (20 MB). Eine eigene Oberfläche
-direkt auf KMS/DRM statt X11+LXDE würde den Großteil davon einsparen.
+direkt auf KMS/DRM statt X11+LXDE spart den Großteil davon ein – siehe
+[X und LXDE entfernen](#x-und-lxde-entfernen).
+
+## X und LXDE entfernen
+
+Seit die eigene Touch-Oberfläche ([pocketchip-ui](https://github.com/MorastBlitz/pocketchip-ui))
+direkt auf DRM/KMS läuft und auch ScummVM ohne X startet (SDL2 `kmsdrm`),
+braucht das System keinen X-Server mehr. Ergebnis:
+
+| | mit LXDE | ohne X |
+|---|---|---|
+| RAM belegt (`free -m`, used) | 108 MB | 60 MB |
+| installierte Pakete | 719 | 532 |
+| belegt auf dem Stick | 1,7 GB | 1,6 GB |
+
+Größter Prozess ist danach NetworkManager mit 14 MB.
+
+Paketliste sichern, dann mit `--no-install-recommends` und erst als
+Simulation (`-s`) entfernen:
+
+```sh
+dpkg --get-selections > ~/pakete-vorher.txt
+sudo systemctl set-default multi-user.target
+sudo systemctl disable pocketchip-one.service     # PocketTRIX-Akku-Daemon, braucht X
+sudo apt-get -s --no-install-recommends purge \
+    lxappearance lxde-common lxinput lxmenu-data lxpanel lxpanel-data lxpolkit \
+    lxrandr lxsession lxsession-data lxsession-edit lxsession-logout lxtask lxlock \
+    openbox pcmanfm libfm4t64 libfm-gtk3-4t64 libfm-modules libfm-data libfm-gtk-data \
+    gpicview mousepad libmousepad0 xarchiver galculator xpad \
+    i3-wm i3lock i3status xss-lock rxvt-unicode suckless-tools lisgd unclutter scrot \
+    wmctrl xdotool xinput xwallpaper x11-utils x11-xserver-utils x11-xkb-utils \
+    xinit xserver-xorg-core xserver-xorg-input-libinput xserver-common \
+    network-manager-applet nm-connection-editor dbus-x11 python3-tk notification-daemon \
+    scummvm+ libinput-tools+
+# passt die Liste: ohne -s wiederholen, danach
+sudo apt-get autoremove --purge     # erst mit -s prüfen
+```
+
+> ⚠️ **Die Nebenpakete müssen mit in die Liste.** Fehlen `lxlock`,
+> `nm-connection-editor` oder `notification-daemon`, erfüllt apt deren
+> Abhängigkeiten neu: Statt 50 Pakete zu entfernen, installiert es über 160,
+> darunter lightdm, xscreensaver, nautilus und gnome-flashback.
+> `scummvm+` verhindert, dass ScummVM mitgeht, denn es hängt an `libgtk-3-0t64`.
+> `dbus-x11` wird durch `dbus-user-session` ersetzt.
+
+Danach von Hand entfernen, was nicht aus Paketen stammt: die PocketTRIX-X-Skripte
+in `/usr/local/bin` (`pocketchip-startx`, `startlxde`, `pocketchip-terminal`,
+`pocketchip-menu`, `pocketchip-browser`, `pocketchip-gestures`,
+`pocketchip-touch-calibrate` …), `/usr/sbin/pocketchip-one`,
+`/etc/xdg/lxsession`, `~/.xinitrc`, `~/.Xresources` und den Start von X in
+`~/.zprofile`. PICO-8 und SunVox laufen nur unter X und sind ebenfalls entfernt.
+
+Die Konsolenwerkzeuge `pocketchip-connect`, `pocketchip-control` und
+`pocketchip-status` bleiben erhalten.
 
 ## Sicherheitsupdates
 
@@ -30,8 +83,9 @@ sudo apt-get purge blueman bluez-obexd udisks2 zathura zathura-pdf-poppler \
 Dazu die verwaisten Bibliotheken (libblockdev*, libudisks2-0, gvfs-*, libpoppler147,
 libgirara …) gezielt per Name – **nicht** pauschal mit `apt autoremove`.
 
-> ⚠️ **Ghostscript (`libgs10`) und `poppler-data` nicht entfernen!** Über
-> `libspectre1 → libimlib2 → openbox` hängt der Fenstermanager daran.
+> ⚠️ **Solange LXDE installiert ist: Ghostscript (`libgs10`) und
+> `poppler-data` nicht entfernen!** Über `libspectre1 → libimlib2 → openbox`
+> hängt der Fenstermanager daran. Ohne X entfällt das.
 > Immer erst mit `apt-get -s purge …` simulieren.
 
 Bluetooth selbst (`bluez`, `bluetooth.service`) bleibt; nur die grafischen
