@@ -366,7 +366,6 @@ impl App {
             action("wifi", "06 WLAN", &wifi),
             action("bt", "07 BLUETOOTH", bt),
             action("time", "08 DATUM / ZEIT", &format!("{:02}.{:02}. {:02}:{:02}", now.day, now.month, now.hour, now.minute)),
-            action("desktop", "09 DESKTOP", "LXDE STARTEN"),
         ]
     }
 
@@ -651,14 +650,6 @@ impl App {
             ("reboot", "yes") => self.do_power("reboot"),
             ("suspend", "yes") => self.do_power("suspend"),
             ("quit_emu", "yes") => self.overlay_exit(EXIT_QUIT_EMU),
-            ("desktop", "yes") => {
-                self.message("STARTE DESKTOP ...", 30);
-                bg(|| util::run("systemctl", &["start", "--no-block", "getty@tty1.service"]), |a, (ok, _, err)| {
-                    if !ok {
-                        a.message(&format!("FEHLER: {}", util::short_err(&err)), 6);
-                    }
-                });
-            }
             ("settime", "yes") => {
                 let t = self.edit;
                 self.message("SETZE ZEIT ...", 10);
@@ -776,11 +767,6 @@ impl App {
             (Page::Menu, "wifi") => self.push(Page::Wifi),
             (Page::Menu, "bt") => self.push(Page::Bt),
             (Page::Menu, "time") => self.push(Page::Time),
-            (Page::Menu, "desktop") => self.confirm(
-                "desktop",
-                "DESKTOP",
-                "LXDE STARTEN? DIE KONSOLE WIRD BEENDET. ZURÜCK ÜBER MENÜ › SYSTEM › POCKETCHIP KONSOLE.",
-            ),
             (Page::Power, "poweroff") => self.confirm("poweroff", "AUSSCHALTEN", "SYSTEM JETZT AUSSCHALTEN?"),
             (Page::Power, "reboot") => self.confirm("reboot", "NEUSTART", "SYSTEM JETZT NEU STARTEN?"),
             (Page::Power, "suspend") => self.confirm("suspend", "STANDBY", "IN STANDBY GEHEN? DISPLAY AUS, CPU GEDROSSELT. AUFWECKEN MIT TASTE, TOUCH ODER POWER-TASTE."),
@@ -1534,7 +1520,7 @@ fn main() {
 
     ui.run().expect("event loop failed");
     sys::cpu_cap(false);
-    // leave the LEDs in their normal state for the desktop
+    // leave the LEDs in their normal state when the console is not running
     led::apply(led::Mode::Normal);
     APP.with(|a| *a.borrow_mut() = None);
     if overlay.is_some() {

@@ -1,4 +1,0 @@
-#!/bin/sh
-# Return from the LXDE desktop to the PocketCHIP console.
-# Starting the console stops getty@tty1 and with it the X session.
-exec sudo -n /usr/bin/systemctl start pocketchip-console.service

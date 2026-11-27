@@ -8,7 +8,7 @@ Software-Renderer direkt auf DRM/KMS (kein X11 nötig), libinput für Touch und 
 
 Startseite: Kacheln ⚙ EINSTELLUNGEN und 🎮 EMULATOREN.
 
-**EMULATOREN**: startet ScummVM im Vollbild direkt auf DRM/KMS (SDL2 `kmsdrm`, GPU über lima, kein X/LXDE). Die Konsole beendet sich dafür und kommt zurück, sobald ScummVM endet (STRG+Q oder „Beenden“ im Startfenster). Spiele nach `~/games/scummvm` kopieren und in ScummVM mit „Spiel hinzufügen“ eintragen. Touch: SDL 2.32 verliert Single-Touch-Displays (Finger-ID −1, keine Mausereignisse ohne Fenster). Deshalb übernimmt `pocketchip-emu-helper.service` den Touchscreen, wendet die Kalibriermatrix an und meldet ihn als absolute Maus (uinput): Tippen = Linksklick, Ziehen = Bewegen mit gedrückter Taste. ScummVM läuft im OpenGL-Modus, damit die Menüs die vollen 480×272 nutzen. Spiele in 4:3 bekommen bei „Fit to window“ schmale schwarze Ränder; „Stretch to window“ unter Global Options › Graphics füllt den Schirm, verzerrt aber. **Pausenmenü**: Die Power-Taste friert ScummVM ein und zeigt das Pausenmenü der Konsole (`pocketchip-console --overlay`): WEITER SPIELEN, BEENDEN, Akku, Uhrzeit, WLAN, IP, CPU, RAM, Helligkeit, Lautstärke, Standby, Neustart, Ausschalten. Power-Taste oder ESC kehren ins Spiel zurück. Der Helfer übernimmt dafür über eine Kopie des Dateideskriptors (`pidfd_getfd`) die DRM-Master-Rolle von ScummVM, gibt sie danach samt Bild zurück und verwirft die Eingaben aus dem Menü, damit sie nicht im Spiel landen.
+**EMULATOREN**: startet ScummVM im Vollbild direkt auf DRM/KMS (SDL2 `kmsdrm`, GPU über lima, ohne X11). Die Konsole beendet sich dafür und kommt zurück, sobald ScummVM endet (STRG+Q oder „Beenden“ im Startfenster). Spiele nach `~/games/scummvm` kopieren und in ScummVM mit „Spiel hinzufügen“ eintragen. Touch: SDL 2.32 verliert Single-Touch-Displays (Finger-ID −1, keine Mausereignisse ohne Fenster). Deshalb übernimmt `pocketchip-emu-helper.service` den Touchscreen, wendet die Kalibriermatrix an und meldet ihn als absolute Maus (uinput): Tippen = Linksklick, Ziehen = Bewegen mit gedrückter Taste. ScummVM läuft im OpenGL-Modus, damit die Menüs die vollen 480×272 nutzen. Spiele in 4:3 bekommen bei „Fit to window“ schmale schwarze Ränder; „Stretch to window“ unter Global Options › Graphics füllt den Schirm, verzerrt aber. **Pausenmenü**: Die Power-Taste friert ScummVM ein und zeigt das Pausenmenü der Konsole (`pocketchip-console --overlay`): WEITER SPIELEN, BEENDEN, Akku, Uhrzeit, WLAN, IP, CPU, RAM, Helligkeit, Lautstärke, Standby, Neustart, Ausschalten. Power-Taste oder ESC kehren ins Spiel zurück. Der Helfer übernimmt dafür über eine Kopie des Dateideskriptors (`pidfd_getfd`) die DRM-Master-Rolle von ScummVM, gibt sie danach samt Bild zurück und verwirft die Eingaben aus dem Menü, damit sie nicht im Spiel landen.
 
 **EINSTELLUNGEN**:
 
@@ -20,7 +20,6 @@ Startseite: Kacheln ⚙ EINSTELLUNGEN und 🎮 EMULATOREN.
 - **06 WLAN** (nmcli): Funk an/aus, Netze suchen, verbinden (Passwort mit Anzeigen-Knopf), trennen, Passwort ändern, vergessen
 - **07 BLUETOOTH** (bluetoothctl): an/aus, suchen, Detailseite je Gerät, koppeln, verbinden, trennen, entfernen. UART mit 115200 Baud (Override), damit BT auch nach Warmstarts geht; zu langsam für Audio
 - **08 DATUM / ZEIT** (timedatectl): NTP, Zeitzone, manuelles Stellen
-- **09 DESKTOP**: wechselt zu LXDE; zurück über Panel-Knopf, Desktop-Symbol oder Menü „PocketCHIP Konsole“
 - **Power-Taste** öffnet einen Ausschalt-Dialog (logind-Inhibitor, solange die Konsole läuft)
 
 Bedienung: Touch überall; Tastatur ↑↓ Auswahl, ◀▶ Wert ändern, Enter öffnen/umschalten, Esc zurück.
@@ -44,8 +43,7 @@ Desktop-Vorschau: `cargo run --no-default-features --features desktop`.
 | Datei | Zweck |
 |---|---|
 | `/usr/local/bin/pocketchip-console` | Programm |
-| `/etc/systemd/system/pocketchip-console.service` | Dienst auf tty1, `Conflicts=getty@tty1` |
-| `/usr/local/bin/pocketchip-console-start` | Rückkehr aus LXDE |
+| `/etc/systemd/system/pocketchip-console.service` | Dienst auf tty1, `Conflicts=getty@tty1` (Autologin-Shell nur bei Bedarf) |
 | `/etc/udev/rules.d/90-pocketchip-touch-libinput.rules` | Kalibriermatrix für libinput ohne X |
 | `/var/lib/pocketchip-console/settings.conf` | Einstellungen |
 | `/etc/systemd/system/pocketchip-emu@.service` | Emulator auf tty1, `Conflicts=pocketchip-console`, startet die Konsole danach wieder |
@@ -53,8 +51,7 @@ Desktop-Vorschau: `cargo run --no-default-features --features desktop`.
 | `/etc/systemd/system/pocketchip-emu-helper.service` | Helfer, läuft nur zusammen mit einem Emulator, hält die Power-Taste (systemd-inhibit) |
 | `/usr/local/lib/pocketchip-console/pocketchip-emu-helper` | Touch → kalibrierte absolute Maus (uinput), Power-Taste → Pausenmenü |
 
-Die Touch-Kalibrierung schreibt die Matrix in udev-Regel, `/etc/default/pocketchip-touch`
-und `/etc/X11/xorg.conf.d/40-pocketchip-touch.conf`.
+Die Touch-Kalibrierung schreibt die Matrix in die udev-Regel und nach `/etc/default/pocketchip-touch`.
 
 ## Entwicklung
 

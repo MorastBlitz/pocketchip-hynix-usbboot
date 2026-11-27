@@ -8,8 +8,7 @@ BIN="${CARGO_TARGET_DIR:-$HOME/.cache/pocketchip-console-target}/armv7-unknown-l
 [ -x "$BIN" ] || { echo "build first: cargo zigbuild --release --target armv7-unknown-linux-gnueabihf.2.41" >&2; exit 1; }
 
 ssh "$HOST" 'mkdir -p /tmp/pcc-install'
-scp -q "$BIN" "$ROOT/system/pocketchip-console.service" "$ROOT/system/pocketchip-console-start" \
-    "$ROOT/system/pocketchip-console.desktop" "$ROOT/system/90-pocketchip-touch-libinput.rules" \
+scp -q "$BIN" "$ROOT/system/pocketchip-console.service" "$ROOT/system/90-pocketchip-touch-libinput.rules" \
     "$ROOT/system/pocketchip-bt-fix" "$ROOT/system/pocketchip-bt-fix.service" \
     "$ROOT/system/firmware/rtl8723bs_config.bin" \
     "$ROOT/system/pocketchip-emu@.service" "$ROOT/system/pocketchip-emu-helper.service" "$ROOT/system/pocketchip-emu-run" "$ROOT/system/pocketchip-emu-helper" \
@@ -17,9 +16,11 @@ scp -q "$BIN" "$ROOT/system/pocketchip-console.service" "$ROOT/system/pocketchip
 ssh "$HOST" ENABLE="${1:-}" POCKETCHIP_USER="${POCKETCHIP_USER:-}" 'set -e; cd /tmp/pcc-install
 sudo install -m 0755 pocketchip-console /usr/local/bin/pocketchip-console.new
 sudo mv /usr/local/bin/pocketchip-console.new /usr/local/bin/pocketchip-console
-sudo install -m 0755 pocketchip-console-start /usr/local/bin/
 sudo install -m 0644 pocketchip-console.service /etc/systemd/system/
-sudo install -m 0644 pocketchip-console.desktop /usr/share/applications/
+# X11/LXDE is gone: remove the old way back from the desktop
+u="${POCKETCHIP_USER:-chip}"; h="$(getent passwd "$u" | cut -d: -f6)"
+sudo rm -f /usr/local/bin/pocketchip-console-start /usr/share/applications/pocketchip-console.desktop
+[ -n "$h" ] && sudo rm -f "$h/Desktop/pocketchip-console.desktop"
 # keep a calibration the console already wrote
 [ -e /etc/udev/rules.d/90-pocketchip-touch-libinput.rules ] || sudo install -m 0644 90-pocketchip-touch-libinput.rules /etc/udev/rules.d/
 sudo udevadm control --reload
@@ -36,27 +37,15 @@ sudo install -m 0644 pocketchip-emu-helper.service /etc/systemd/system/
 sudo rm -f /etc/systemd/system/pocketchip-emu-touch.service /usr/local/lib/pocketchip-console/pocketchip-emu-touch
 sed "s/^User=chip$/User=$u/" pocketchip-emu@.service | sudo tee /etc/systemd/system/pocketchip-emu@.service >/dev/null
 dpkg -s scummvm >/dev/null 2>&1 || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends scummvm
-# way back from LXDE: desktop icon and first button in the panel launchbar
-u="${POCKETCHIP_USER:-chip}"; h="$(getent passwd "$u" | cut -d: -f6)"
-if [ -n "$h" ]; then
-  sudo -u "$u" mkdir -p "$h/Desktop"
-  sudo -u "$u" install -m 0755 pocketchip-console.desktop "$h/Desktop/"
-  p="$h/.config/lxpanel/LXDE/panels/panel"
-  if [ -f "$p" ] && ! grep -q pocketchip-console.desktop "$p"; then
-    sudo -u "$u" cp "$p" "$p.bak-pcc"
-    sudo -u "$u" sed -i "/type=launchbar/,/Config {/{/Config {/a\\    Button {\\n      id=pocketchip-console.desktop\\n    }
-}" "$p"
-  fi
-fi
 sudo systemctl daemon-reload
 if [ "$ENABLE" != "--no-enable" ]; then
-  # boot into the console; getty@tty1 (autologin + LXDE) only on demand
+  # boot into the console; the getty@tty1 autologin shell only on demand
   sudo systemctl disable getty@tty1.service 2>/dev/null || true
   sudo systemctl enable pocketchip-console.service
   sudo systemctl enable pocketchip-bt-fix.service
 fi
 if systemctl is-active -q getty@tty1.service; then
-  echo "LXDE laeuft: Konsole startet beim naechsten Wechsel zurueck"
+  echo "Shell auf tty1 aktiv: Konsole nicht neu gestartet (systemctl start pocketchip-console)"
 else
   sudo systemctl restart pocketchip-console.service
 fi

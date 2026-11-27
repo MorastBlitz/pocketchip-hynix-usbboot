@@ -1,5 +1,6 @@
 //! Touch calibration: fit a libinput calibration matrix from raw samples and
-//! store it for KMS (udev property), X11 (xorg.conf.d) and the shell tools.
+//! store it for libinput (udev property: the console on KMS, SDL apps) and the
+//! shell tools (/etc/default/pocketchip-touch).
 
 use crate::util::run;
 
@@ -8,7 +9,6 @@ pub const W: f64 = 480.0;
 pub const H: f64 = 272.0;
 
 const DEFAULTS: &str = "/etc/default/pocketchip-touch";
-const XORG: &str = "/etc/X11/xorg.conf.d/40-pocketchip-touch.conf";
 const UDEV: &str = "/etc/udev/rules.d/90-pocketchip-touch-libinput.rules";
 
 fn det3(m: [[f64; 3]; 3]) -> f64 {
@@ -80,26 +80,11 @@ pub fn save(m: &[f64; 6]) -> std::result::Result<(), String> {
     let six = fmt6(m);
     let nine = format!("{six} 0 0 1");
 
-    // /etc/default/pocketchip-touch (shell tools, xinitrc re-apply)
+    // /etc/default/pocketchip-touch (pocketchip-touch-calibrate and other shell tools)
     let old = std::fs::read_to_string(DEFAULTS).unwrap_or_else(|_| "POCKETCHIP_TOUCH_DEVICE=1c25000.rtp\n".into());
     let mut lines: Vec<String> = old.lines().filter(|l| !l.starts_with("POCKETCHIP_TOUCH_MATRIX=")).map(String::from).collect();
     lines.push(format!("POCKETCHIP_TOUCH_MATRIX='{nine}'"));
     std::fs::write(DEFAULTS, lines.join("\n") + "\n").map_err(|e| format!("{DEFAULTS}: {e}"))?;
-
-    // X11
-    if let Ok(x) = std::fs::read_to_string(XORG) {
-        let new: Vec<String> = x
-            .lines()
-            .map(|l| {
-                if l.trim_start().starts_with("Option \"CalibrationMatrix\"") {
-                    format!("    Option \"CalibrationMatrix\" \"{nine}\"")
-                } else {
-                    l.to_string()
-                }
-            })
-            .collect();
-        std::fs::write(XORG, new.join("\n") + "\n").map_err(|e| format!("{XORG}: {e}"))?;
-    }
 
     // KMS / libinput via udev
     let rule = format!(
