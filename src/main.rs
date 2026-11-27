@@ -121,6 +121,8 @@ struct App {
     bat_warned: bool,
     /// seconds left before the low battery power-off (None = not armed)
     bat_off_in: Option<u32>,
+    /// debug: pretend this battery state (Some(level), -1 = on charger)
+    pub bat_fake: Option<i64>,
 }
 
 /// Exit code of the pause menu: 0 resume, 10 quit the emulator.
@@ -1443,6 +1445,18 @@ impl App {
             self.cpu.sample();
         }
         self.bat = sys::Battery::read();
+        if let Some(f) = self.bat_fake {
+            // debug control file: `fakebat N` / `fakebat charge` / `fakebat off`
+            if f < 0 {
+                self.bat.usb_online = true;
+                self.bat.status = "Charging".into();
+            } else {
+                self.bat.capacity = f;
+                self.bat.usb_online = false;
+                self.bat.ac_online = false;
+                self.bat.status = "Discharging".into();
+            }
+        }
         self.be().set_battery(self.bat.short().into());
         self.check_battery();
         self.be().set_net(
@@ -1570,6 +1584,7 @@ fn main() {
         standby: false,
         bat_warned: false,
         bat_off_in: None,
+        bat_fake: None,
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {

@@ -5,12 +5,14 @@
 # (about 2 minutes at or below the level) as a fallback.
 # The level comes from the console settings (battery_off, 0 = never).
 set -u
-BAT=/sys/class/power_supply/axp20x-battery
-USB=/sys/class/power_supply/axp20x-usb
-AC=/sys/class/power_supply/axp20x-ac
-SETTINGS=/var/lib/pocketchip-console/settings.conf
-INTERVAL=30
+# paths and timing can be overridden for testing
+BAT=${GUARD_BAT:-/sys/class/power_supply/axp20x-battery}
+USB=${GUARD_USB:-/sys/class/power_supply/axp20x-usb}
+AC=${GUARD_AC:-/sys/class/power_supply/axp20x-ac}
+SETTINGS=${GUARD_SETTINGS:-/var/lib/pocketchip-console/settings.conf}
+INTERVAL=${GUARD_INTERVAL:-30}
 NEEDED=4   # consecutive low readings (4 x 30 s)
+POWEROFF=${GUARD_POWEROFF:-systemctl poweroff}
 
 rd() { cat "$1" 2>/dev/null || echo "${2:-}"; }
 level() {
@@ -33,7 +35,7 @@ while :; do
     echo "battery low: ${cap}% <= ${off}% ($low/$NEEDED)"
     if [ "$low" -ge "$NEEDED" ]; then
       echo "battery empty, powering off"
-      systemctl poweroff
+      $POWEROFF
       exit 0
     fi
   else

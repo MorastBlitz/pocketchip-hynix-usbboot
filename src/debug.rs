@@ -1,5 +1,6 @@
 //! Debug control file: /run/pocketchip-console/cmd (root only).
-//! Lines: `snap PATH`, `key up|down|left|right|enter|esc|<char>`, `tap X Y`.
+//! Lines: `snap PATH`, `key up|down|left|right|enter|esc|<char>`, `tap X Y`,
+//! `fakebat N|charge|off` (pretend a battery level for testing).
 
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, SharedString};
@@ -66,6 +67,14 @@ pub fn poll(ui: &crate::AppWindow) {
             ["raw", x, y] => {
                 let (x, y) = (x.parse().unwrap_or(0.0), y.parse().unwrap_or(0.0));
                 crate::with_app(move |a| a.on_input(crate::hw::InputEvent::TouchRaw(x, y)))
+            }
+            ["fakebat", v] => {
+                let f = match *v {
+                    "off" => None,
+                    "charge" => Some(-1),
+                    n => n.parse().ok(),
+                };
+                crate::with_app(move |a| a.bat_fake = f)
             }
             ["activity"] => crate::with_app(|a| a.on_input(crate::hw::InputEvent::Activity)),
             ["power"] => crate::with_app(|a| a.on_input(crate::hw::InputEvent::PowerKey)),
