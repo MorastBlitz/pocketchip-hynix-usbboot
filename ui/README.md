@@ -1,5 +1,7 @@
 # pocketchip-console
 
+Teil des Repos [PocketCHIP](../README.md): System und Bootloader liegen im Hauptordner, die Oberfläche hier in `ui/`.
+
 Touch- und Tastatur-Oberfläche für den PocketCHIP (CHIP v1.0, 480×272, resistiver Touch)
 im Stil eines Retro-Terminals, grün auf schwarz. Rust + [Slint](https://slint.dev),
 Software-Renderer direkt auf DRM/KMS (kein X11 nötig), libinput für Touch und Tastatur.
@@ -26,7 +28,10 @@ Bedienung: Touch überall; Tastatur ↑↓ Auswahl, ◀▶ Wert ändern, Enter �
 
 ## Bauen (macOS, Apple Silicon)
 
+Alle Befehle im Ordner `ui/` ausführen.
+
 ```bash
+cd ui
 brew install zig cargo-zigbuild
 rustup target add armv7-unknown-linux-gnueabihf
 scripts/make-sysroot.sh        # holt libinput/libudev/libxkbcommon/libfontconfig vom Gerät

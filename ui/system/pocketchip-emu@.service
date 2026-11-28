@@ -1,6 +1,6 @@
 [Unit]
 Description=PocketCHIP Emulator %i (Vollbild auf DRM/KMS, ohne X)
-Documentation=https://github.com/MorastBlitz/pocketchip-ui
+Documentation=https://github.com/MorastBlitz/pocketchip
 # The emulator takes tty1 and the display from the console (and from the
 # getty@tty1 shell).
 # When it ends, ExecStopPost brings the console back.

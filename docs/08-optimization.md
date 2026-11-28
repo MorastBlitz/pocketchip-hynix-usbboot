@@ -17,7 +17,7 @@ direkt auf KMS/DRM statt X11+LXDE spart den Großteil davon ein – siehe
 
 ## X und LXDE entfernen
 
-Seit die eigene Touch-Oberfläche ([pocketchip-ui](https://github.com/MorastBlitz/pocketchip-ui))
+Seit die eigene Touch-Oberfläche ([ui/](../ui/README.md))
 direkt auf DRM/KMS läuft und auch ScummVM ohne X startet (SDL2 `kmsdrm`),
 braucht das System keinen X-Server mehr. Ergebnis:
 

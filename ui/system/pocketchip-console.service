@@ -1,13 +1,13 @@
 [Unit]
 Description=PocketCHIP Konsole (Touch-Oberflaeche auf DRM/KMS)
-Documentation=https://github.com/MorastBlitz/pocketchip-ui
+Documentation=https://github.com/MorastBlitz/pocketchip
 # No ordering after the network or systemd-user-sessions (which waits for
 # network.target): the console polls Wi-Fi in the background, so it can show
 # up ~5 s earlier. logind is needed for the power key inhibitor.
 After=systemd-logind.service systemd-udev-trigger.service
 # The console and the autologin shell on getty@tty1 share tty1: starting one
 # stops the other.
-# The boot logo (pocketchip-bootsplash.service, pocketchip-hynix-usbboot) is
+# The boot logo (pocketchip-bootsplash.service, rootfs/ in this repo) is
 # ended by the drop-in pocketchip-console.service.d/stop-bootsplash.conf; do
 # not add Conflicts= with it: both are in the same boot transaction and
 # systemd would drop the console.

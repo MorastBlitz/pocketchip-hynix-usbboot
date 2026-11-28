@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["MorastBlitz", "Claude"]
 license = "MIT"
 description = "Retro terminal style touch console for the PocketCHIP"
+repository = "https://github.com/MorastBlitz/pocketchip"
 
 [features]
 default = ["kms"]
