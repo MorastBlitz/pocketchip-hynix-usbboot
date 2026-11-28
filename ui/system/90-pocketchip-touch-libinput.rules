@@ -1,0 +1,4 @@
+# Calibration matrix for libinput (pocketchip-console on KMS, SDL apps).
+# Same values as /etc/default/pocketchip-touch; the console's
+# touch calibration rewrites both.
+ACTION=="add|change", KERNEL=="event*", ATTRS{name}=="1c25000.rtp", ENV{LIBINPUT_CALIBRATION_MATRIX}="-1.07169 -0.01700 1.04440 0.01932 -1.18735 1.04330"

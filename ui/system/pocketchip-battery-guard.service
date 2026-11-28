@@ -1,0 +1,11 @@
+[Unit]
+Description=PocketCHIP: bei leerem Akku sauber herunterfahren
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/pocketchip-battery-guard
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,562 @@
+// PocketCHIP console: retro terminal style system interface.
+// One generic list page driven by Rust (rows model), plus dialogs.
+
+import "../assets/fonts/DejaVuSansMono.ttf";
+import "../assets/fonts/DejaVuSansMono-Bold.ttf";
+
+export struct Row {
+    id: string,
+    label: string,
+    value: string,
+    // 0 action, 1 toggle, 2 adjustable (left/right), 3 info, 4 separator, 5 text input
+    kind: int,
+    enabled: bool,
+}
+
+export global Theme {
+    out property <color> fg: #39ff6a;
+    out property <color> dim: #1f8f3c;
+    out property <color> faint: #0c3a18;
+    out property <color> bg: #000000;
+    out property <color> warn: #39ff6a;
+    out property <length> row-h: 24px;
+    out property <length> font: 13px;
+    out property <length> font-small: 11px;
+}
+
+// Double line frame drawn with two nested borders.
+component Frame inherits Rectangle {
+    in property <string> title;
+    border-width: 1px;
+    border-color: Theme.fg;
+    Rectangle {
+        x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px;
+        border-width: 1px;
+        border-color: Theme.dim;
+    }
+    if root.title != "": Rectangle {
+        x: 10px; y: -7px;
+        width: t.preferred-width + 12px; height: 14px;
+        background: Theme.bg;
+        t := Text {
+            text: root.title;
+            color: Theme.fg;
+            font-size: Theme.font-small;
+            font-weight: 700;
+        }
+    }
+    @children
+}
+
+component RowView inherits Rectangle {
+    in property <Row> item;
+    in property <bool> selected;
+    callback tapped();
+    callback adjust(int);
+    height: Theme.row-h;
+    property <bool> active: item.enabled && item.kind != 4;
+    background: (selected && item.kind != 3 && item.kind != 4) ? Theme.fg : transparent;
+    property <color> ink: (selected && item.kind != 3 && item.kind != 4) ? Theme.bg : (item.enabled ? Theme.fg : Theme.dim);
+
+    if item.kind == 4: Rectangle {
+        Rectangle { x: 0; y: parent.height / 2; width: parent.width; height: 1px; background: Theme.dim; }
+        Rectangle {
+            x: 12px; width: sep.preferred-width + 10px; height: parent.height;
+            background: Theme.bg;
+            sep := Text { text: item.label; color: Theme.dim; font-size: Theme.font-small; font-weight: 700; vertical-alignment: center; }
+        }
+    }
+    if item.kind != 4: Rectangle {
+        // selection marker for info rows
+        Text {
+            x: 4px; width: 12px;
+            text: selected ? "▶" : "";
+            color: root.ink;
+            font-size: Theme.font-small;
+            vertical-alignment: center;
+        }
+        Text {
+            x: 18px;
+            width: parent.width * 0.48 - 18px;
+            text: item.label;
+            color: root.ink;
+            font-size: Theme.font;
+            font-weight: 700;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            x: parent.width * 0.48;
+            width: parent.width * 0.52 - 8px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            text: item.kind == 2 ? "◀ " + item.value + " ▶"
+                : item.kind == 1 ? "[" + item.value + "]"
+                : item.kind == 0 && item.value == "" ? "»"
+                : item.value;
+            color: root.ink;
+            font-size: Theme.font;
+            overflow: elide;
+        }
+    }
+    if root.active: TouchArea {
+        clicked => {
+            if item.kind == 2 {
+                root.adjust(self.mouse-x < self.width / 2 ? -1 : 1);
+            } else {
+                root.tapped();
+            }
+        }
+    }
+}
+
+component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked();
+    height: 26px;
+    border-width: 1px;
+    border-color: Theme.fg;
+    background: selected ? Theme.fg : Theme.bg;
+    Text {
+        text: root.text;
+        color: root.selected ? Theme.bg : Theme.fg;
+        font-size: Theme.font;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export global Backend {
+    // navigation
+    in property <string> title: "HAUPTMENÜ";
+    in property <[Row]> rows;
+    in-out property <int> sel: 0;
+    in property <int> depth: 0;
+    // start page: rows are shown as a tile grid
+    in property <bool> home: false;
+    callback activate(string);
+    callback adjust(string, int);
+    callback back();
+    callback selected(string);
+
+    // header
+    in property <string> clock: "--:--";
+    in property <string> battery: "---";
+    in property <string> net: "";
+    in property <string> message: "";
+    in property <bool> scanlines: true;
+
+    // dialog
+    in property <bool> dialog-open: false;
+    in property <string> dialog-id;
+    in property <string> dialog-title;
+    in property <string> dialog-text;
+    in property <[string]> dialog-buttons;
+    in-out property <int> dialog-sel: 0;
+    callback dialog-result(string, int);
+
+    // text input
+    in property <bool> input-open: false;
+    in property <string> input-id;
+    in property <string> input-title;
+    in property <string> input-prompt;
+    in property <bool> input-secret: true;
+    callback input-done(string, string, bool);
+
+    // touch calibration overlay
+    in property <bool> calib-open: false;
+    in property <length> calib-x;
+    in property <length> calib-y;
+    in property <string> calib-text;
+    callback calib-cancel();
+
+    // screen off: swallow input until woken
+    in property <bool> screen-off: false;
+    callback key-activity();
+}
+
+component HomeTile inherits Rectangle {
+    in property <Row> item;
+    in property <bool> selected;
+    callback tapped();
+    width: 104px;
+    height: 100px;
+    border-width: 1px;
+    border-color: Theme.fg;
+    background: root.selected || ta.pressed ? Theme.fg : Theme.bg;
+    Image {
+        y: 12px;
+        x: (parent.width - self.width) / 2;
+        width: 52px;
+        height: 52px;
+        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : @image-url("../assets/gear.svg");
+        colorize: root.selected || ta.pressed ? Theme.bg : Theme.fg;
+    }
+    Text {
+        y: 72px;
+        width: parent.width;
+        height: 20px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: item.label;
+        font-size: Theme.font-small;
+        font-weight: 700;
+        color: root.selected || ta.pressed ? Theme.bg : Theme.fg;
+    }
+    ta := TouchArea { clicked => { root.tapped(); } }
+}
+
+component Dialog inherits Rectangle {
+    background: #000000c0;
+    TouchArea { }
+    Frame {
+        title: Backend.dialog-title;
+        x: 40px; width: parent.width - 80px;
+        height: 40px + Backend.dialog-buttons.length * 30px + msg.preferred-height;
+        y: (parent.height - self.height) / 2;
+        background: Theme.bg;
+        msg := Text {
+            x: 14px; y: 16px; width: parent.width - 28px;
+            text: Backend.dialog-text;
+            color: Theme.fg;
+            font-size: Theme.font;
+            wrap: word-wrap;
+        }
+        for b[i] in Backend.dialog-buttons: Button {
+            x: 24px; width: parent.width - 48px;
+            y: msg.y + msg.preferred-height + 14px + i * 30px;
+            text: b;
+            selected: i == Backend.dialog-sel;
+            clicked => { Backend.dialog-sel = i; Backend.dialog-result(Backend.dialog-id, i); }
+        }
+    }
+}
+
+component InputBox inherits Rectangle {
+    callback done(bool);
+    in-out property <string> value;
+    in-out property <bool> reveal: false;
+    background: #000000c0;
+    TouchArea { }
+    public function focus-input() { ti.focus(); }
+    Frame {
+        title: Backend.input-title;
+        x: 24px; width: parent.width - 48px;
+        y: 30px; height: 150px;
+        background: Theme.bg;
+        Text {
+            x: 14px; y: 16px; width: parent.width - 28px;
+            text: Backend.input-prompt;
+            color: Theme.fg; font-size: Theme.font; overflow: elide;
+        }
+        Rectangle {
+            x: 14px; y: 40px; width: parent.width - 28px; height: 28px;
+            border-width: 1px; border-color: Theme.fg;
+            ti := TextInput {
+                x: 6px; width: parent.width - 12px;
+                vertical-alignment: center;
+                text <=> root.value;
+                input-type: Backend.input-secret && !root.reveal ? InputType.password : InputType.text;
+                color: Theme.fg;
+                selection-background-color: Theme.dim;
+                selection-foreground-color: Theme.bg;
+                font-size: 14px;
+                single-line: true;
+                key-pressed(e) => {
+                    if e.text == Key.Escape { root.done(false); return accept; }
+                    if e.text == Key.Return { root.done(true); return accept; }
+                    if e.text == Key.Tab { root.reveal = !root.reveal; return accept; }
+                    reject
+                }
+                accepted => { root.done(true); }
+            }
+            TouchArea { clicked => { ti.focus(); } }
+        }
+        property <length> bw: (self.width - 28px - 16px) / 3;
+        Button { x: 14px; y: 80px; height: 32px; width: bw; text: "OK"; clicked => { root.done(true); } }
+        Button {
+            x: 14px + bw + 8px; y: 80px; height: 32px; width: bw;
+            visible: Backend.input-secret;
+            text: root.reveal ? "VERBERGEN" : "ZEIGEN";
+            selected: root.reveal;
+            clicked => { root.reveal = !root.reveal; root.focus-input(); }
+        }
+        Button { x: 14px + 2 * (bw + 8px); y: 80px; height: 32px; width: bw; text: "ABBRUCH"; clicked => { root.done(false); } }
+        Text {
+            x: 14px; y: 122px;
+            text: Backend.input-secret ? "⏎ OK   ESC ABBRUCH   TAB ZEIGEN" : "⏎ OK   ESC ABBRUCH";
+            color: Theme.dim; font-size: Theme.font-small;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    width: 480px;
+    height: 272px;
+    background: Theme.bg;
+    default-font-family: "DejaVu Sans Mono";
+    title: "PocketCHIP Konsole";
+
+    property <Row> cur: Backend.rows.length > 0 ? Backend.rows[Backend.sel] : { kind: 4 };
+    property <length> list-h: list.height;
+
+    function selectable(i: int) -> bool {
+        return Backend.rows[i].kind != 4 && Backend.rows[i].enabled;
+    }
+    function move(d: int) {
+        if Backend.rows.length == 0 { return; }
+        let i1 = Backend.sel + d;
+        let i2 = (i1 >= 0 && i1 < Backend.rows.length && !root.selectable(i1)) ? i1 + (d > 0 ? 1 : -1) : i1;
+        let i = (i2 >= 0 && i2 < Backend.rows.length && !root.selectable(i2)) ? i2 + (d > 0 ? 1 : -1) : i2;
+        if i >= 0 && i < Backend.rows.length && root.selectable(i) {
+            Backend.sel = i;
+            Backend.selected(Backend.rows[i].id);
+        }
+        root.scroll-to-sel();
+    }
+    function scroll-to-sel() {
+        // rows above the selection (separators are shorter)
+        let top = Backend.sel * Theme.row-h;
+        let bottom = top + Theme.row-h;
+        if top < -flick.content-y { flick.content-y = -top + (Backend.sel <= 1 ? 0px : 0px); }
+        if bottom > -flick.content-y + flick.height { flick.content-y = flick.height - bottom; }
+        if Backend.sel <= 1 { flick.content-y = 0; }
+    }
+    function home-move(d: int) {
+        let i = Backend.sel + d;
+        if i >= 0 && i < Backend.rows.length { Backend.sel = i; }
+    }
+    public function refocus() {
+        if Backend.input-open { input.focus-input(); } else { keys.focus(); }
+    }
+    property <bool> input-open: Backend.input-open;
+    changed input-open => {
+        if Backend.input-open { input.value = ""; input.reveal = false; }
+        root.refocus();
+    }
+    property <int> row-count: Backend.rows.length;
+    changed row-count => {
+        if Backend.sel >= Backend.rows.length { Backend.sel = max(0, Backend.rows.length - 1); }
+        root.scroll-to-sel();
+    }
+    property <string> page-title: Backend.title;
+    changed page-title => { flick.content-y = 0; root.scroll-to-sel(); }
+
+    keys := FocusScope {
+        key-pressed(e) => {
+            Backend.key-activity();
+            if Backend.screen-off { return accept; }
+            if Backend.calib-open {
+                if e.text == Key.Escape { Backend.calib-cancel(); }
+                return accept;
+            }
+            if Backend.dialog-open {
+                if e.text == Key.UpArrow || e.text == Key.LeftArrow {
+                    Backend.dialog-sel = max(0, Backend.dialog-sel - 1);
+                } else if e.text == Key.DownArrow || e.text == Key.RightArrow || e.text == Key.Tab {
+                    Backend.dialog-sel = min(Backend.dialog-buttons.length - 1, Backend.dialog-sel + 1);
+                } else if e.text == Key.Return || e.text == " " {
+                    Backend.dialog-result(Backend.dialog-id, Backend.dialog-sel);
+                } else if e.text == Key.Escape {
+                    Backend.dialog-result(Backend.dialog-id, -1);
+                }
+                return accept;
+            }
+            if Backend.home {
+                if e.text == Key.LeftArrow { root.home-move(-1); }
+                else if e.text == Key.RightArrow || e.text == Key.Tab { root.home-move(1); }
+                else if e.text == Key.UpArrow { root.home-move(-4); }
+                else if e.text == Key.DownArrow { root.home-move(4); }
+                else if e.text == Key.Return || e.text == " " {
+                    if Backend.rows.length > 0 { Backend.activate(Backend.rows[Backend.sel].id); }
+                }
+                return accept;
+            }
+            if e.text == Key.UpArrow { root.move(-1); return accept; }
+            if e.text == Key.DownArrow || e.text == Key.Tab { root.move(1); return accept; }
+            if e.text == Key.PageUp { root.move(-6); return accept; }
+            if e.text == Key.PageDown { root.move(6); return accept; }
+            if e.text == Key.LeftArrow {
+                if cur.kind == 2 || cur.kind == 1 { Backend.adjust(cur.id, -1); } else { Backend.back(); }
+                return accept;
+            }
+            if e.text == Key.RightArrow {
+                if cur.kind == 2 || cur.kind == 1 { Backend.adjust(cur.id, 1); }
+                else if cur.kind == 0 || cur.kind == 5 { Backend.activate(cur.id); }
+                return accept;
+            }
+            if e.text == Key.Return || e.text == " " {
+                if cur.kind == 2 { Backend.adjust(cur.id, 1); }
+                else if cur.enabled && cur.kind != 4 { Backend.activate(cur.id); }
+                return accept;
+            }
+            if e.text == Key.Escape || e.text == Key.Backspace { Backend.back(); return accept; }
+            reject
+        }
+    }
+
+    // ---- header -------------------------------------------------------
+    Rectangle {
+        x: 0; y: 0; width: parent.width; height: 20px;
+        background: Theme.fg;
+        Text {
+            x: 6px; vertical-alignment: center; height: parent.height;
+            text: "C.H.I.P. // " + Backend.title;
+            color: Theme.bg; font-size: 12px; font-weight: 700;
+        }
+        Text {
+            x: parent.width - self.width - 6px; vertical-alignment: center; height: parent.height;
+            text: Backend.net + "  " + Backend.battery + "  " + Backend.clock;
+            color: Theme.bg; font-size: 12px; font-weight: 700;
+        }
+        // tap on header goes back
+        TouchArea {
+            width: 200px; x: 0;
+            clicked => { if !Backend.dialog-open { Backend.back(); } }
+        }
+    }
+
+    // ---- start page ---------------------------------------------------
+    if Backend.home: Frame {
+        x: 2px; y: 24px; width: parent.width - 4px; height: parent.height - 24px - 32px;
+        for r[i] in Backend.rows: HomeTile {
+            x: 14px + mod(i, 4) * 114px;
+            y: 14px + floor(i / 4) * 108px;
+            item: r;
+            selected: i == Backend.sel;
+            tapped => {
+                Backend.sel = i;
+                root.refocus();
+                Backend.activate(r.id);
+            }
+        }
+    }
+
+    // ---- list ---------------------------------------------------------
+    Frame {
+        visible: !Backend.home;
+        x: 2px; y: 24px; width: parent.width - 4px; height: parent.height - 24px - 32px;
+        list := Rectangle {
+            x: 5px; y: 5px; width: parent.width - 10px - 8px; height: parent.height - 10px;
+            flick := Flickable {
+                content-height: max(self.height, rowsbox.preferred-height);
+                rowsbox := VerticalLayout {
+                    spacing: 0px;
+                    alignment: start;
+                    for r[i] in Backend.rows: RowView {
+                        item: r;
+                        selected: i == Backend.sel;
+                        tapped => {
+                            Backend.sel = i;
+                            Backend.selected(r.id);
+                            root.refocus();
+                            if r.kind == 1 { Backend.adjust(r.id, 1); } else { Backend.activate(r.id); }
+                        }
+                        adjust(d) => {
+                            Backend.sel = i;
+                            Backend.selected(r.id);
+                            root.refocus();
+                            Backend.adjust(r.id, d);
+                        }
+                    }
+                }
+            }
+        }
+        // scrollbar
+        if flick.content-height > flick.height: Rectangle {
+            x: parent.width - 9px; y: 6px; width: 4px; height: parent.height - 12px;
+            border-width: 1px; border-color: Theme.faint;
+            Rectangle {
+                x: 0; width: parent.width;
+                height: max(10px, parent.height * flick.height / flick.content-height);
+                y: (parent.height - self.height) * (-flick.content-y) / max(1px, flick.content-height - flick.height);
+                background: Theme.dim;
+            }
+        }
+    }
+
+    // ---- footer -------------------------------------------------------
+    Rectangle {
+        x: 0; y: parent.height - 30px; width: parent.width; height: 30px;
+        Text {
+            x: 6px; height: parent.height; vertical-alignment: center;
+            width: parent.width - (Backend.depth > 0 ? 122px : 12px);
+            overflow: elide;
+            text: Backend.message != "" ? "» " + Backend.message
+                : Backend.home ? "◀▶ WAHL  ⏎ ÖFFNEN"
+                : cur.kind == 2 ? "↑↓ WAHL  ◀▶ WERT  ESC ZURÜCK"
+                : cur.kind == 1 ? "↑↓ WAHL  ⏎ UMSCHALTEN  ESC ZURÜCK"
+                : cur.kind == 3 ? "↑↓ BLÄTTERN  ESC ZURÜCK"
+                : "↑↓ WAHL  ⏎ ÖFFNEN  ESC ZURÜCK";
+            color: Theme.fg; font-size: Theme.font-small;
+        }
+        // touch back button, big enough for a finger
+        if Backend.depth > 0: Rectangle {
+            x: parent.width - 114px; width: 112px; y: 2px; height: 27px;
+            border-width: 1px; border-color: Theme.fg;
+            background: back-ta.pressed ? Theme.fg : Theme.bg;
+            Text {
+                text: "◀ ZURÜCK";
+                color: back-ta.pressed ? Theme.bg : Theme.fg;
+                font-size: Theme.font; font-weight: 700;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+            back-ta := TouchArea {
+                // a little extra reach towards the screen edge
+                x: -8px; y: -4px; width: parent.width + 10px; height: parent.height + 6px;
+                clicked => { if !Backend.dialog-open { Backend.back(); } }
+            }
+        }
+    }
+
+    // static, subtle scanlines
+    if Backend.scanlines: Image {
+        x: 0; y: 0; width: parent.width; height: parent.height;
+        source: @image-url("../assets/scanline.png");
+        horizontal-tiling: repeat;
+        vertical-tiling: repeat;
+    }
+
+    if Backend.dialog-open: Dialog { width: parent.width; height: parent.height; }
+    input := InputBox {
+        visible: Backend.input-open;
+        width: parent.width; height: parent.height;
+        done(ok) => { Backend.input-done(Backend.input-id, self.value, ok); self.value = ""; }
+    }
+
+    if Backend.calib-open: Rectangle {
+        background: Theme.bg;
+        TouchArea { }
+        Frame { x: 2px; y: 10px; width: parent.width - 4px; height: parent.height - 12px; title: "TOUCH-KALIBRIERUNG"; }
+        Text {
+            x: 0; width: parent.width; y: 90px;
+            horizontal-alignment: center;
+            text: Backend.calib-text;
+            color: Theme.fg; font-size: Theme.font; font-weight: 700;
+        }
+        Text {
+            x: 0; width: parent.width; y: 170px;
+            horizontal-alignment: center;
+            text: "MIT DEM STIFT GENAU AUF DIE MITTE TIPPEN\nESC ABBRECHEN";
+            color: Theme.dim; font-size: Theme.font-small;
+        }
+        // crosshair
+        Rectangle { x: Backend.calib-x - 14px; y: Backend.calib-y; width: 29px; height: 1px; background: Theme.fg; }
+        Rectangle { x: Backend.calib-x; y: Backend.calib-y - 14px; width: 1px; height: 29px; background: Theme.fg; }
+        Rectangle {
+            x: Backend.calib-x - 6px; y: Backend.calib-y - 6px; width: 13px; height: 13px;
+            border-width: 1px; border-color: Theme.fg;
+        }
+    }
+
+    // Black curtain while the backlight is off; swallows the waking tap.
+    if Backend.screen-off: Rectangle {
+        background: black;
+        TouchArea { }
+    }
+
+    init => { keys.focus(); }
+}

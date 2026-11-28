@@ -1,0 +1,37 @@
+[Unit]
+Description=PocketCHIP Konsole (Touch-Oberflaeche auf DRM/KMS)
+Documentation=https://github.com/MorastBlitz/pocketchip-ui
+# No ordering after the network or systemd-user-sessions (which waits for
+# network.target): the console polls Wi-Fi in the background, so it can show
+# up ~5 s earlier. logind is needed for the power key inhibitor.
+After=systemd-logind.service systemd-udev-trigger.service
+# The console and the autologin shell on getty@tty1 share tty1: starting one
+# stops the other.
+# The boot logo (pocketchip-bootsplash.service, pocketchip-hynix-usbboot) is
+# ended by the drop-in pocketchip-console.service.d/stop-bootsplash.conf; do
+# not add Conflicts= with it: both are in the same boot transaction and
+# systemd would drop the console.
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+# The sun4i display driver can probe after this unit starts: wait (max 15 s)
+# until a DRM connector exists.
+ExecStartPre=/bin/sh -c 'for i in $$(seq 1 150); do for c in /sys/class/drm/card*-*/status; do [ -e "$$c" ] && exit 0; done; sleep 0.1; done; exit 0'
+# Hold a logind inhibitor while the console runs: the power key then opens the
+# console's own dialog instead of shutting down. Without the console (e.g. on
+# the getty@tty1 shell) logind's HandlePowerKey setting applies again.
+ExecStart=/usr/bin/systemd-inhibit --what=handle-power-key --who=pocketchip-console --why="Power-Taste oeffnet den Ausschalt-Dialog" --mode=block /usr/local/bin/pocketchip-console
+Environment=SLINT_BACKEND=linuxkms-software
+Restart=always
+RestartSec=1
+StandardInput=tty-force
+StandardOutput=journal
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

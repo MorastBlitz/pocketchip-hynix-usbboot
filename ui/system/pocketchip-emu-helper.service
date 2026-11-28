@@ -1,0 +1,12 @@
+[Unit]
+Description=PocketCHIP Emulator-Helfer (Touch als Maus, Pausenmenue auf der Power-Taste)
+# started by pocketchip-emu@.service (Requires=), stops with it
+StopWhenUnneeded=yes
+
+[Service]
+# simple: a READY notification from behind systemd-inhibit does not reach
+# systemd; pocketchip-emu-run waits for the virtual mouse instead
+Type=simple
+# logind leaves the power key to the helper while an emulator runs
+ExecStart=/usr/bin/systemd-inhibit --what=handle-power-key --who=pocketchip-emu-helper --why="Power-Taste oeffnet das Pausenmenue" --mode=block /usr/local/lib/pocketchip-console/pocketchip-emu-helper
+Restart=on-failure
