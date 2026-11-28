@@ -13,6 +13,49 @@ export struct Row {
     enabled: bool,
 }
 
+export struct TermSeg {
+    row: int,
+    col: int,
+    text: string,
+    inv: bool,
+    bold: bool,
+}
+
+// PocketCHIP keyboard on top of the plain "us" xkb layout of KMS:
+// Fn (right Alt) layer as in the former X11 Xmodmap, plus the keys whose
+// shift level differs from "us" ("+"/"=", "."/",", "-"/"_").
+export global KeyMap {
+    pure public function pc-key(t: string, fn: bool, shift: bool) -> string {
+        if fn {
+            if t == "y" { return "{"; }
+            if t == "u" { return "}"; }
+            if t == "i" { return "["; }
+            if t == "o" { return "]"; }
+            if t == "p" { return "|"; }
+            if t == "h" { return "<"; }
+            if t == "j" { return ">"; }
+            if t == "k" { return "'"; }
+            if t == "l" { return "\""; }
+            if t == "b" { return "`"; }
+            if t == "n" { return "~"; }
+            if t == "m" { return ":"; }
+            if t == "." { return ";"; }
+            if t == "/" { return "\\"; }
+            if t == Key.Backspace { return Key.Delete; }
+            if t == Key.UpArrow { return Key.PageUp; }
+            if t == Key.DownArrow { return Key.PageDown; }
+            if t == Key.LeftArrow { return Key.Home; }
+            if t == Key.RightArrow { return Key.End; }
+            return t;
+        }
+        if t == ">" && shift { return ","; }
+        if t == "=" && !shift { return "+"; }
+        if t == "+" && shift { return "="; }
+        if t == "-" && shift { return "_"; }
+        return t;
+    }
+}
+
 export global Theme {
     out property <color> fg: #39ff6a;
     out property <color> dim: #1f8f3c;
@@ -137,6 +180,17 @@ export global Backend {
     in property <int> depth: 0;
     // start page: rows are shown as a tile grid
     in property <bool> home: false;
+    // built-in terminal
+    in property <bool> term: false;
+    in property <[TermSeg]> term-segs;
+    in property <bool> term-ctrl: false;
+    // terminal grid, set by Rust (DejaVu Sans Mono advance = 0.602 em)
+    in property <length> term-font: 12px;
+    in property <length> term-cw: 7.2246px;
+    in property <length> term-lh: 14px;
+    callback term-key(string, bool);
+    callback term-soft(string);
+    callback term-scroll(int);
     callback activate(string);
     callback adjust(string, int);
     callback back();
@@ -192,7 +246,7 @@ component HomeTile inherits Rectangle {
         x: (parent.width - self.width) / 2;
         width: 52px;
         height: 52px;
-        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : @image-url("../assets/gear.svg");
+        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : item.id == "term" ? @image-url("../assets/terminal.svg") : @image-url("../assets/gear.svg");
         colorize: root.selected || ta.pressed ? Theme.bg : Theme.fg;
     }
     Text {
@@ -267,6 +321,14 @@ component InputBox inherits Rectangle {
                 single-line: true;
                 key-pressed(e) => {
                     if e.text == Key.Escape { root.done(false); return accept; }
+                    // symbols of the PocketCHIP Fn layer / shift levels
+                    if !e.modifiers.control && e.text != Key.Backspace && e.text != Key.UpArrow && e.text != Key.DownArrow
+                        && e.text != Key.LeftArrow && e.text != Key.RightArrow {
+                        if KeyMap.pc-key(e.text, e.modifiers.alt, e.modifiers.shift) != e.text {
+                            root.value += KeyMap.pc-key(e.text, e.modifiers.alt, e.modifiers.shift);
+                            return accept;
+                        }
+                    }
                     if e.text == Key.Return { root.done(true); return accept; }
                     if e.text == Key.Tab { root.reveal = !root.reveal; return accept; }
                     reject
@@ -365,6 +427,16 @@ export component AppWindow inherits Window {
                 }
                 return accept;
             }
+            if Backend.term {
+                if (KeyMap.pc-key(e.text, e.modifiers.alt, e.modifiers.shift) == Key.PageUp) && e.modifiers.shift {
+                    Backend.term-scroll(9);
+                } else if (KeyMap.pc-key(e.text, e.modifiers.alt, e.modifiers.shift) == Key.PageDown) && e.modifiers.shift {
+                    Backend.term-scroll(-9);
+                } else {
+                    Backend.term-key(KeyMap.pc-key(e.text, e.modifiers.alt, e.modifiers.shift), e.modifiers.control);
+                }
+                return accept;
+            }
             if Backend.home {
                 if e.text == Key.LeftArrow { root.home-move(-1); }
                 else if e.text == Key.RightArrow || e.text == Key.Tab { root.home-move(1); }
@@ -435,9 +507,44 @@ export component AppWindow inherits Window {
         }
     }
 
+    // ---- terminal -----------------------------------------------------
+    if Backend.term: Rectangle {
+        x: 2px; y: 22px; width: parent.width - 4px; height: parent.height - 22px - 32px;
+        clip: true;
+        for sg in Backend.term-segs: Rectangle {
+            x: sg.col * Backend.term-cw;
+            y: sg.row * Backend.term-lh;
+            width: sg.text.character-count * Backend.term-cw;
+            height: Backend.term-lh;
+            background: sg.inv ? Theme.fg : transparent;
+            Text {
+                x: 0; y: 0; height: parent.height;
+                vertical-alignment: center;
+                text: sg.text;
+                font-size: Backend.term-font;
+                font-weight: sg.bold ? 700 : 400;
+                color: sg.inv ? Theme.bg : Theme.fg;
+            }
+        }
+        // drag to scroll through the history
+        property <length> last-y;
+        TouchArea {
+            pointer-event(ev) => {
+                if ev.kind == PointerEventKind.down { parent.last-y = self.mouse-y; }
+            }
+            moved => {
+                if abs(self.mouse-y - parent.last-y) >= Backend.term-lh {
+                    Backend.term-scroll(round((self.mouse-y - parent.last-y) / Backend.term-lh));
+                    parent.last-y = self.mouse-y;
+                }
+            }
+            clicked => { root.refocus(); }
+        }
+    }
+
     // ---- list ---------------------------------------------------------
     Frame {
-        visible: !Backend.home;
+        visible: !Backend.home && !Backend.term;
         x: 2px; y: 24px; width: parent.width - 4px; height: parent.height - 24px - 32px;
         list := Rectangle {
             x: 5px; y: 5px; width: parent.width - 10px - 8px; height: parent.height - 10px;
@@ -481,7 +588,16 @@ export component AppWindow inherits Window {
     // ---- footer -------------------------------------------------------
     Rectangle {
         x: 0; y: parent.height - 30px; width: parent.width; height: 30px;
-        Text {
+        if Backend.term: Rectangle {
+            x: 2px; y: 2px; width: parent.width - 120px; height: 27px;
+            property <length> kw: (self.width - 4 * 4px) / 5;
+            Button { x: 0; width: kw; height: parent.height; text: "ESC"; clicked => { Backend.term-soft("esc"); root.refocus(); } }
+            Button { x: (kw + 4px); width: kw; height: parent.height; text: "TAB"; clicked => { Backend.term-soft("tab"); root.refocus(); } }
+            Button { x: 2 * (kw + 4px); width: kw; height: parent.height; text: "CTRL"; selected: Backend.term-ctrl; clicked => { Backend.term-soft("ctrl"); root.refocus(); } }
+            Button { x: 3 * (kw + 4px); width: kw; height: parent.height; text: "▲"; clicked => { Backend.term-soft("up"); root.refocus(); } }
+            Button { x: 4 * (kw + 4px); width: kw; height: parent.height; text: "▼"; clicked => { Backend.term-soft("down"); root.refocus(); } }
+        }
+        if !Backend.term: Text {
             x: 6px; height: parent.height; vertical-alignment: center;
             width: parent.width - (Backend.depth > 0 ? 122px : 12px);
             overflow: elide;
@@ -513,7 +629,8 @@ export component AppWindow inherits Window {
     }
 
     // static, subtle scanlines
-    if Backend.scanlines: Image {
+    // not over the terminal: small text is hard to read through them
+    if Backend.scanlines && !Backend.term: Image {
         x: 0; y: 0; width: parent.width; height: parent.height;
         source: @image-url("../assets/scanline.png");
         horizontal-tiling: repeat;

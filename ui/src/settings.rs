@@ -20,6 +20,8 @@ pub struct Settings {
     pub battery_warn: i64,
     /// power off at or below this level (%), 0 = never
     pub battery_off: i64,
+    /// terminal font: large (12 px, 65x15) or small (10 px, 79x18)
+    pub term_big: bool,
 }
 
 impl Default for Settings {
@@ -36,6 +38,7 @@ impl Default for Settings {
             muted: false,
             battery_warn: 10,
             battery_off: 5,
+            term_big: true,
         }
     }
 }
@@ -63,6 +66,7 @@ impl Settings {
                 "muted" => s.muted = v == "1",
                 "battery_warn" => s.battery_warn = v.parse().unwrap_or(s.battery_warn),
                 "battery_off" => s.battery_off = v.parse().unwrap_or(s.battery_off),
+                "term_big" => s.term_big = v == "1",
                 _ => {}
             }
         }
@@ -82,6 +86,7 @@ impl Settings {
         m.insert("muted", (self.muted as u8).to_string());
         m.insert("battery_warn", self.battery_warn.to_string());
         m.insert("battery_off", self.battery_off.to_string());
+        m.insert("term_big", (self.term_big as u8).to_string());
         let text: String = m.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
         let p = path();
         if let Some(dir) = std::path::Path::new(&p).parent() {

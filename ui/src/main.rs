@@ -5,6 +5,7 @@ mod hw;
 mod led;
 mod settings;
 mod sys;
+mod term;
 mod timecfg;
 mod touchcal;
 mod util;
@@ -33,6 +34,7 @@ enum Page {
     Bt,
     Time,
     Emus,
+    Term,
     /// Pause menu over a running emulator (`--overlay LABEL`).
     Overlay(String),
     TzRegion,
@@ -54,6 +56,7 @@ impl Page {
             Page::Bt => "BLUETOOTH".into(),
             Page::Time => "DATUM / ZEIT".into(),
             Page::Emus => "EMULATOREN".into(),
+            Page::Term => "TERMINAL".into(),
             Page::Overlay(l) => format!("PAUSE / {l}"),
             Page::TzRegion => "ZEITZONE".into(),
             Page::TzCity(r) => format!("ZEITZONE / {}", r.to_uppercase()),
@@ -123,6 +126,10 @@ struct App {
     bat_off_in: Option<u32>,
     /// debug: pretend this battery state (Some(level), -1 = on charger)
     pub bat_fake: Option<i64>,
+    term: Option<term::Term>,
+    term_segs: Rc<VecModel<TermSeg>>,
+    term_ctrl: bool,
+    term_redraw_pending: bool,
 }
 
 /// Exit code of the pause menu: 0 resume, 10 quit the emulator.
@@ -202,6 +209,7 @@ impl App {
                 self.scan_wifi(false);
             }
             Page::Bt => self.poll_bt(true),
+            Page::Term => self.term_open(),
             Page::BtDevice(mac) => {
                 self.bt_dev = None;
                 self.poll_bt_dev(mac.clone());
@@ -231,6 +239,7 @@ impl App {
         be.set_title(page.title().into());
         be.set_depth((self.stack.len() - 1) as i32);
         be.set_home(page == Page::Home);
+        be.set_term(page == Page::Term);
         if self.rows.row_count() == rows.len() {
             for (i, r) in rows.iter().enumerate() {
                 if self.rows.row_data(i).as_ref() != Some(r) {
@@ -274,7 +283,12 @@ impl App {
 
     fn build_rows(&self, page: &Page) -> Vec<Row> {
         match page {
-            Page::Home => vec![action("settings", "EINSTELLUNGEN", ""), action("emus", "EMULATOREN", "")],
+            Page::Home => vec![
+                action("settings", "EINSTELLUNGEN", ""),
+                action("term", "TERMINAL", ""),
+                action("emus", "EMULATOREN", ""),
+            ],
+            Page::Term => Vec::new(),
             Page::Emus => self.rows_emus(),
             Page::Overlay(l) => self.rows_overlay(l),
             Page::Menu => self.rows_menu(),
@@ -299,6 +313,7 @@ impl App {
                     adjust("standby", "STANDBY NACH", &fmt_timeout(s.standby_timeout)),
                     toggle("standby_bat", "STANDBY NUR AKKU", s.standby_on_battery_only, true),
                     toggle("scanlines", "SCANLINES", s.scanlines, true),
+                    row("term_big", "TERMINAL-SCHRIFT", if s.term_big { "GROSS" } else { "KLEIN" }, 1, true),
                     toggle("led_on", "LED IM BETRIEB", s.led_on, true),
                     row("led_standby", "LED IM STANDBY", if s.led_standby_blink { "BLINKEN" } else { "AUS" }, 1, true),
                     action("screen_now", "DISPLAY JETZT AUS", ""),
@@ -750,6 +765,7 @@ impl App {
         match (&page, id.as_str()) {
             (Page::Home, "settings") => self.push(Page::Menu),
             (Page::Home, "emus") => self.push(Page::Emus),
+            (Page::Home, "term") => self.push(Page::Term),
             (Page::Overlay(_), "resume") => self.overlay_exit(0),
             (Page::Overlay(l), "quit_emu") => {
                 let text = format!("{l} BEENDEN? NICHT GESPEICHERTER SPIELSTAND GEHT VERLOREN.");
@@ -946,6 +962,11 @@ impl App {
             (Page::Display, "led_standby") => {
                 self.settings.led_standby_blink = !self.settings.led_standby_blink;
                 self.settings.save();
+            }
+            (Page::Display, "term_big") => {
+                self.settings.term_big = !self.settings.term_big;
+                self.settings.save();
+                self.term_apply_geom();
             }
             (Page::Display, "scanlines") => {
                 self.settings.scanlines = !self.settings.scanlines;
@@ -1373,6 +1394,129 @@ impl App {
         }
     }
 
+    // ---- terminal --------------------------------------------------------
+
+    /// (rows, cols, font px, char width px, line height px) of the terminal
+    /// area (476 x 218 px).
+    fn term_geom(&self) -> (u16, u16, f32, f32, f32) {
+        if self.settings.term_big {
+            (15, 65, 12.0, 7.2246, 14.0)
+        } else {
+            (18, 79, 10.0, 6.0205, 12.0)
+        }
+    }
+
+    fn term_apply_geom(&mut self) {
+        let (rows, cols, font, cw, lh) = self.term_geom();
+        let be = self.be();
+        be.set_term_font(font);
+        be.set_term_cw(cw);
+        be.set_term_lh(lh);
+        if let Some(t) = self.term.as_mut() {
+            t.resize(rows, cols);
+        }
+        self.term_redraw();
+    }
+
+    fn term_open(&mut self) {
+        if self.term.as_ref().map(|t| t.alive()).unwrap_or(false) {
+            self.term_redraw();
+            return;
+        }
+        self.term_apply_geom();
+        let (rows, cols, ..) = self.term_geom();
+        match term::Term::spawn(rows, cols) {
+            Ok(t) => {
+                if let Some(fd) = t.reader_fd() {
+                    let pid = t.pid;
+                    term::spawn_reader(fd, move |data| {
+                        let _ = slint::invoke_from_event_loop(move || with_app(move |a| a.term_output(pid, data)));
+                    });
+                }
+                self.term = Some(t);
+                self.term_redraw();
+            }
+            Err(e) => self.message(&format!("FEHLER: {e}"), 6),
+        }
+    }
+
+    fn term_output(&mut self, pid: libc::pid_t, data: Option<Vec<u8>>) {
+        let Some(t) = self.term.as_mut().filter(|t| t.pid == pid) else { return };
+        match data {
+            Some(bytes) => {
+                t.parser.process(&bytes);
+                // coalesce bursts of output into one redraw
+                if !self.term_redraw_pending {
+                    self.term_redraw_pending = true;
+                    slint::Timer::single_shot(Duration::from_millis(40), || {
+                        with_app(|a| {
+                            a.term_redraw_pending = false;
+                            a.term_redraw();
+                        })
+                    });
+                }
+            }
+            None => {
+                self.term = None;
+                self.term_segs.set_vec(Vec::new());
+                if self.page() == Page::Term {
+                    self.back();
+                    self.message("SHELL BEENDET", 3);
+                }
+            }
+        }
+    }
+
+    fn term_redraw(&mut self) {
+        if self.page() != Page::Term {
+            return;
+        }
+        let Some(t) = self.term.as_ref() else { return };
+        let segs: Vec<TermSeg> = t
+            .segments()
+            .into_iter()
+            .map(|s| TermSeg { row: s.row as i32, col: s.col as i32, text: s.text.into(), inv: s.inverse, bold: s.bold })
+            .collect();
+        self.term_segs.set_vec(segs);
+    }
+
+    fn term_key(&mut self, text: String, ctrl: bool) {
+        let ctrl = ctrl || self.term_ctrl;
+        let Some(t) = self.term.as_mut() else { return };
+        let bytes = t.encode_key(&text, ctrl);
+        if bytes.is_empty() {
+            return; // a bare modifier key: keep a pending CTRL
+        }
+        t.write(&bytes);
+        if self.term_ctrl {
+            self.term_ctrl = false;
+            self.be().set_term_ctrl(false);
+        }
+        self.term_redraw();
+    }
+
+    fn term_soft(&mut self, id: String) {
+        use slint::platform::Key;
+        match id.as_str() {
+            "ctrl" => {
+                self.term_ctrl = !self.term_ctrl;
+                self.be().set_term_ctrl(self.term_ctrl);
+            }
+            "esc" => self.term_key(char::from(Key::Escape).to_string(), false),
+            "tab" => self.term_key(char::from(Key::Tab).to_string(), false),
+            "up" => self.term_key(char::from(Key::UpArrow).to_string(), false),
+            "down" => self.term_key(char::from(Key::DownArrow).to_string(), false),
+            _ => {}
+        }
+    }
+
+    fn term_scroll(&mut self, lines: i32) {
+        if let Some(t) = self.term.as_mut() {
+            t.scroll(lines as isize);
+        }
+        self.term_redraw();
+    }
+
     /// Low battery: warn once per discharge, power off with a countdown.
     /// pocketchip-battery-guard.service is the fallback when the console
     /// is not running (e.g. during an emulator).
@@ -1539,8 +1683,10 @@ fn main() {
     hw::LAST_ACTIVITY.store(mono_ms(), Ordering::Relaxed);
 
     let rows = Rc::new(VecModel::<Row>::default());
+    let term_segs = Rc::new(VecModel::<TermSeg>::default());
     let be = ui.global::<Backend>();
     be.set_rows(ModelRc::from(rows.clone()));
+    be.set_term_segs(ModelRc::from(term_segs.clone()));
     be.set_scanlines(settings.scanlines);
 
     be.on_activate(|id| with_app(move |a| a.activate(id.to_string())));
@@ -1549,6 +1695,9 @@ fn main() {
     be.on_selected(|_| {});
     be.on_dialog_result(|id, i| with_app(move |a| a.dialog_result(id.to_string(), i)));
     be.on_input_done(|id, text, ok| with_app(move |a| a.input_done(id.to_string(), text.to_string(), ok)));
+    be.on_term_key(|t, ctrl| with_app(move |a| a.term_key(t.to_string(), ctrl)));
+    be.on_term_soft(|id| with_app(move |a| a.term_soft(id.to_string())));
+    be.on_term_scroll(|n| with_app(move |a| a.term_scroll(n)));
     be.on_calib_cancel(|| with_app(|a| a.calib_cancel()));
     be.on_key_activity(|| hw::LAST_ACTIVITY.store(mono_ms(), Ordering::Relaxed));
 
@@ -1585,6 +1734,10 @@ fn main() {
         bat_warned: false,
         bat_off_in: None,
         bat_fake: None,
+        term: None,
+        term_segs: term_segs.clone(),
+        term_ctrl: false,
+        term_redraw_pending: false,
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {
