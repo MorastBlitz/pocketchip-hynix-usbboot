@@ -1579,7 +1579,7 @@ impl App {
             }
         }
         v.push(sep("HINWEIS"));
-        v.push(info("KERNEL-VERSION", "BLEIBT (BOOT-EINTRAG)"));
+        v.push(info("NEUER KERNEL", "AKTIV NACH NEUSTART"));
         v
     }
 

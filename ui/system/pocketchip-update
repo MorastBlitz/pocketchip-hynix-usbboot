@@ -5,10 +5,9 @@
 # The console starts "upgrade" as its own unit (pocketchip-update.service via
 # systemd-run), so it keeps running when the console restarts.
 #
-# Kernel: /boot/extlinux/extlinux.conf names the kernel with its version and
-# nothing rewrites it, so a new kernel ABI would be installed but never booted.
-# install.sh holds the linux-image-armmp metapackage for that reason; updates
-# of the running kernel package (same version string) still come through.
+# Kernel: a new kernel ABI comes in as a new package, so keep --with-new-pkgs.
+# pocketchip-update-extlinux (kernel postinst/postrm hook from rootfs/) then
+# rewrites /boot/extlinux/extlinux.conf; the new kernel is used after a reboot.
 set -u
 export DEBIAN_FRONTEND=noninteractive LC_ALL=C
 LOG=/var/log/pocketchip-update.log

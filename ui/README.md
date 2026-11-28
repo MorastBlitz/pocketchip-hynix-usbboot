@@ -24,7 +24,7 @@ Startseite: Kacheln ⚙ EINSTELLUNGEN und 🎮 EMULATOREN.
 - **06 WLAN** (nmcli): Funk an/aus, Netze suchen, verbinden (Passwort mit Anzeigen-Knopf), trennen, Passwort ändern, vergessen
 - **07 BLUETOOTH** (bluetoothctl): an/aus, suchen, Detailseite je Gerät, koppeln, verbinden, trennen, entfernen. UART mit 115200 Baud (Override), damit BT auch nach Warmstarts geht; zu langsam für Audio
 - **08 DATUM / ZEIT** (timedatectl): NTP, Zeitzone, manuelles Stellen
-- **09 UPDATE** (apt): Paketlisten prüfen, aktualisierbare Pakete anzeigen, aktualisieren (`pocketchip-update`, läuft als eigene Unit weiter, auch wenn die Konsole neu startet; nicht unter 30 % Akku ohne Ladegerät; kein Standby währenddessen). `linux-image-armmp` ist auf hold, weil `extlinux.conf` den Kernel mit fester Versionsnummer bootet.
+- **09 UPDATE** (apt): Paketlisten prüfen, aktualisierbare Pakete anzeigen, aktualisieren (`pocketchip-update`, läuft als eigene Unit weiter, auch wenn die Konsole neu startet; nicht unter 30 % Akku ohne Ladegerät; kein Standby währenddessen). Neue Kernel trägt `pocketchip-update-extlinux` automatisch in `extlinux.conf` ein (siehe docs/08); `--with-new-pkgs` in `pocketchip-update` muss deshalb bleiben.
 - **Power-Taste** öffnet einen Ausschalt-Dialog (logind-Inhibitor, solange die Konsole läuft)
 
 Bedienung: Touch überall; Tastatur ↑↓ Auswahl, ◀▶ Wert ändern, Enter öffnen/umschalten, Esc zurück.

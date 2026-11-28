@@ -34,9 +34,9 @@ sudo install -m 0644 pocketchip-bt-fix.service /etc/systemd/system/
 sudo install -m 0755 pocketchip-update /usr/local/sbin/
 sudo install -d /usr/local/lib/pocketchip-console
 sudo install -m 0755 pocketchip-upload /usr/local/lib/pocketchip-console/
-# extlinux.conf names the kernel with its version and nothing rewrites it:
-# keep apt from installing a new kernel ABI that would never be booted
-if dpkg -s linux-image-armmp >/dev/null 2>&1; then sudo apt-mark hold linux-image-armmp >/dev/null; fi
+# new kernels are added to extlinux.conf by pocketchip-update-extlinux (rootfs);
+# lift the hold that older versions of this script set
+if dpkg -s linux-image-armmp >/dev/null 2>&1; then sudo apt-mark unhold linux-image-armmp >/dev/null; fi
 # low battery: power off even when the console is not running
 sudo install -m 0755 pocketchip-battery-guard /usr/local/sbin/
 sudo install -m 0644 pocketchip-battery-guard.service /etc/systemd/system/
