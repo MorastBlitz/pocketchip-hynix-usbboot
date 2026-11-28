@@ -12,6 +12,8 @@ Startseite: Kacheln ⚙ EINSTELLUNGEN und 🎮 EMULATOREN.
 
 **EMULATOREN**: startet ScummVM im Vollbild direkt auf DRM/KMS (SDL2 `kmsdrm`, GPU über lima, ohne X11). Die Konsole beendet sich dafür und kommt zurück, sobald ScummVM endet (STRG+Q oder „Beenden“ im Startfenster). Spiele nach `~/games/scummvm` kopieren und in ScummVM mit „Spiel hinzufügen“ eintragen. Touch: SDL 2.32 verliert Single-Touch-Displays (Finger-ID −1, keine Mausereignisse ohne Fenster). Deshalb übernimmt `pocketchip-emu-helper.service` den Touchscreen, wendet die Kalibriermatrix an und meldet ihn als absolute Maus (uinput): Tippen = Linksklick, Ziehen = Bewegen mit gedrückter Taste. ScummVM läuft im OpenGL-Modus, damit die Menüs die vollen 480×272 nutzen. Spiele in 4:3 bekommen bei „Fit to window“ schmale schwarze Ränder; „Stretch to window“ unter Global Options › Graphics füllt den Schirm, verzerrt aber. **Pausenmenü**: Die Power-Taste friert ScummVM ein und zeigt das Pausenmenü der Konsole (`pocketchip-console --overlay`): WEITER SPIELEN, BEENDEN, Akku, Uhrzeit, WLAN, IP, CPU, RAM, Helligkeit, Lautstärke, Standby, Neustart, Ausschalten. Power-Taste oder ESC kehren ins Spiel zurück. Der Helfer übernimmt dafür über eine Kopie des Dateideskriptors (`pidfd_getfd`) die DRM-Master-Rolle von ScummVM, gibt sie danach samt Bild zurück und verwirft die Eingaben aus dem Menü, damit sie nicht im Spiel landen.
 
+**UPLOAD**: startet einen kleinen Webserver (Port 8080, `pocketchip-upload`, Python-Standardbibliothek) für `~/games`: Ordner durchblättern, Dateien herunterladen, Dateien und ganze Ordner hochladen, Ordner anlegen und löschen. Zugriff nur mit der PIN, die die Konsole anzeigt; läuft als Benutzer, bis er ausgeschaltet wird.
+
 **EINSTELLUNGEN**:
 
 - **01 SYSTEMSTATUS**: Host, Modell, Kernel, CPU, Takt, Auslastung, Load, RAM, Swap, Speicher, Uptime, IP, Temperaturen
@@ -22,6 +24,7 @@ Startseite: Kacheln ⚙ EINSTELLUNGEN und 🎮 EMULATOREN.
 - **06 WLAN** (nmcli): Funk an/aus, Netze suchen, verbinden (Passwort mit Anzeigen-Knopf), trennen, Passwort ändern, vergessen
 - **07 BLUETOOTH** (bluetoothctl): an/aus, suchen, Detailseite je Gerät, koppeln, verbinden, trennen, entfernen. UART mit 115200 Baud (Override), damit BT auch nach Warmstarts geht; zu langsam für Audio
 - **08 DATUM / ZEIT** (timedatectl): NTP, Zeitzone, manuelles Stellen
+- **09 UPDATE** (apt): Paketlisten prüfen, aktualisierbare Pakete anzeigen, aktualisieren (`pocketchip-update`, läuft als eigene Unit weiter, auch wenn die Konsole neu startet; nicht unter 30 % Akku ohne Ladegerät; kein Standby währenddessen). `linux-image-armmp` ist auf hold, weil `extlinux.conf` den Kernel mit fester Versionsnummer bootet.
 - **Power-Taste** öffnet einen Ausschalt-Dialog (logind-Inhibitor, solange die Konsole läuft)
 
 Bedienung: Touch überall; Tastatur ↑↓ Auswahl, ◀▶ Wert ändern, Enter öffnen/umschalten, Esc zurück.

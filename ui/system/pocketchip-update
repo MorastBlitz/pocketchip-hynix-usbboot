@@ -1,0 +1,40 @@
+#!/bin/sh
+# OS update for the PocketCHIP console (EINSTELLUNGEN > UPDATE).
+#   pocketchip-update check     refresh package lists, print "UPG <pkg> <version>"
+#   pocketchip-update upgrade   install the updates, log to /var/log/pocketchip-update.log
+# The console starts "upgrade" as its own unit (pocketchip-update.service via
+# systemd-run), so it keeps running when the console restarts.
+#
+# Kernel: /boot/extlinux/extlinux.conf names the kernel with its version and
+# nothing rewrites it, so a new kernel ABI would be installed but never booted.
+# install.sh holds the linux-image-armmp metapackage for that reason; updates
+# of the running kernel package (same version string) still come through.
+set -u
+export DEBIAN_FRONTEND=noninteractive LC_ALL=C
+LOG=/var/log/pocketchip-update.log
+
+case "${1:-}" in
+check)
+  apt-get update -q >/dev/null 2>/tmp/pocketchip-update-check.err || {
+    tail -n 3 /tmp/pocketchip-update-check.err
+    exit 1
+  }
+  apt list --upgradable 2>/dev/null | sed -n 's#^\([^/]*\)/[^ ]* \([^ ]*\) .*#UPG \1 \2#p'
+  ;;
+upgrade)
+  {
+    echo "=== $(date '+%F %T') pocketchip-update"
+    apt-get update -q
+    apt-get -y -q --with-new-pkgs \
+      -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+      upgrade
+    rc=$?
+    echo "EXIT=$rc"
+    exit $rc
+  } >"$LOG" 2>&1
+  ;;
+*)
+  echo "usage: $0 check|upgrade" >&2
+  exit 2
+  ;;
+esac

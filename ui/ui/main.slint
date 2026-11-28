@@ -239,20 +239,20 @@ component HomeTile inherits Rectangle {
     in property <bool> selected;
     callback tapped();
     width: 104px;
-    height: 100px;
+    height: 94px;
     border-width: 1px;
     border-color: Theme.fg;
     background: root.selected || ta.pressed ? Theme.fg : Theme.bg;
     Image {
-        y: 12px;
+        y: 9px;
         x: (parent.width - self.width) / 2;
-        width: 52px;
-        height: 52px;
-        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : item.id == "term" ? @image-url("../assets/terminal.svg") : item.id == "help" ? @image-url("../assets/help.svg") : @image-url("../assets/gear.svg");
+        width: 50px;
+        height: 50px;
+        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : item.id == "term" ? @image-url("../assets/terminal.svg") : item.id == "help" ? @image-url("../assets/help.svg") : item.id == "upload" ? @image-url("../assets/upload.svg") : @image-url("../assets/gear.svg");
         colorize: root.selected || ta.pressed ? Theme.bg : Theme.fg;
     }
     Text {
-        y: 72px;
+        y: 66px;
         width: parent.width;
         height: 20px;
         horizontal-alignment: center;
@@ -501,7 +501,8 @@ export component AppWindow inherits Window {
         x: 2px; y: 24px; width: parent.width - 4px; height: parent.height - 24px - 32px;
         for r[i] in Backend.rows: HomeTile {
             x: 14px + mod(i, 4) * 114px;
-            y: 14px + floor(i / 4) * 108px;
+            // two rows of tiles fit into the frame (216 px)
+            y: 9px + floor(i / 4) * 100px;
             item: r;
             selected: i == Backend.sel;
             tapped => {

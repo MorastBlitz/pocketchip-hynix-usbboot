@@ -8,6 +8,8 @@ mod sys;
 mod term;
 mod timecfg;
 mod touchcal;
+mod update;
+mod upload;
 mod util;
 mod wifi;
 
@@ -36,6 +38,8 @@ enum Page {
     Emus,
     Term,
     Help,
+    Update,
+    Upload,
     /// Pause menu over a running emulator (`--overlay LABEL`).
     Overlay(String),
     TzRegion,
@@ -59,6 +63,8 @@ impl Page {
             Page::Emus => "EMULATOREN".into(),
             Page::Term => "TERMINAL".into(),
             Page::Help => "HILFE".into(),
+            Page::Update => "UPDATE".into(),
+            Page::Upload => "UPLOAD".into(),
             Page::Overlay(l) => format!("PAUSE / {l}"),
             Page::TzRegion => "ZEITZONE".into(),
             Page::TzCity(r) => format!("ZEITZONE / {}", r.to_uppercase()),
@@ -191,6 +197,15 @@ struct App {
     term_segs: Rc<VecModel<TermSeg>>,
     term_ctrl: bool,
     term_redraw_pending: bool,
+    upd_pkgs: Option<Vec<(String, String)>>,
+    upd_checking: bool,
+    upd_last_check: String,
+    upd_progress: update::Progress,
+    upd_total: usize,
+    upd_poll_busy: bool,
+    upload_on: bool,
+    upload_pin: String,
+    upload_busy: bool,
 }
 
 /// Exit code of the pause menu: 0 resume, 10 quit the emulator.
@@ -271,6 +286,11 @@ impl App {
             }
             Page::Bt => self.poll_bt(true),
             Page::Term => self.term_open(),
+            Page::Upload => {
+                self.ips = sys::ip_addrs();
+                self.upload_poll();
+            }
+            Page::Update => self.update_poll(),
             Page::BtDevice(mac) => {
                 self.bt_dev = None;
                 self.poll_bt_dev(mac.clone());
@@ -349,10 +369,13 @@ impl App {
                 action("settings", "EINSTELLUNGEN", ""),
                 action("term", "TERMINAL", ""),
                 action("emus", "EMULATOREN", ""),
+                action("upload", "UPLOAD", ""),
                 action("help", "HILFE", ""),
             ],
             Page::Term => Vec::new(),
             Page::Help => help_rows(),
+            Page::Update => self.rows_update(),
+            Page::Upload => self.rows_upload(),
             Page::Emus => self.rows_emus(),
             Page::Overlay(l) => self.rows_overlay(l),
             Page::Menu => self.rows_menu(),
@@ -454,6 +477,19 @@ impl App {
             action("wifi", "06 WLAN", &wifi),
             action("bt", "07 BLUETOOTH", bt),
             action("time", "08 DATUM / ZEIT", &format!("{:02}.{:02}. {:02}:{:02}", now.day, now.month, now.hour, now.minute)),
+            action(
+                "update",
+                "09 UPDATE",
+                &if self.upd_progress.running {
+                    "LÄUFT ...".to_string()
+                } else {
+                    match &self.upd_pkgs {
+                        Some(p) if !p.is_empty() => format!("{} UPDATES", p.len()),
+                        Some(_) => "AKTUELL".to_string(),
+                        None => String::new(),
+                    }
+                },
+            ),
         ]
     }
 
@@ -736,6 +772,7 @@ impl App {
             ("power", a) => self.do_power(a),
             ("poweroff", "yes") => self.do_power("poweroff"),
             ("lowbat_off", "now") => self.do_power("poweroff"),
+            ("upd", "yes") => self.update_start(),
             ("reboot", "yes") => self.do_power("reboot"),
             ("suspend", "yes") => self.do_power("suspend"),
             ("quit_emu", "yes") => self.overlay_exit(EXIT_QUIT_EMU),
@@ -831,6 +868,21 @@ impl App {
             (Page::Home, "emus") => self.push(Page::Emus),
             (Page::Home, "term") => self.push(Page::Term),
             (Page::Home, "help") => self.push(Page::Help),
+            (Page::Home, "upload") => self.push(Page::Upload),
+            (Page::Menu, "update") => self.push(Page::Update),
+            (Page::Update, "check") => self.update_check(),
+            (Page::Update, "upgrade") => {
+                let b = &self.bat;
+                if b.present && !b.external_power() && b.capacity >= 0 && b.capacity < 30 {
+                    self.message("AKKU UNTER 30 %: BITTE LADEGERÄT ANSCHLIESSEN", 6);
+                } else {
+                    let n = self.upd_pkgs.as_ref().map(|p| p.len()).unwrap_or(0);
+                    let text = format!("JETZT {n} PAKETE AKTUALISIEREN? DAS DAUERT EINIGE MINUTEN. GERÄT DABEI NICHT AUSSCHALTEN.");
+                    self.confirm("upd", "UPDATE", &text);
+                }
+            }
+            (Page::Update, "reboot") => self.confirm("reboot", "NEUSTART", "SYSTEM JETZT NEU STARTEN?"),
+            (Page::Upload, "upl") => self.adjust(id, 1),
             (Page::Overlay(_), "resume") => self.overlay_exit(0),
             (Page::Overlay(l), "quit_emu") => {
                 let text = format!("{l} BEENDEN? NICHT GESPEICHERTER SPIELSTAND GEHT VERLOREN.");
@@ -1027,6 +1079,32 @@ impl App {
             (Page::Display, "led_standby") => {
                 self.settings.led_standby_blink = !self.settings.led_standby_blink;
                 self.settings.save();
+            }
+            (Page::Upload, "upl") => {
+                if self.upload_busy {
+                    return;
+                }
+                self.upload_busy = true;
+                let on = !self.upload_on;
+                let pin = upload::new_pin();
+                let pin2 = pin.clone();
+                bg(
+                    move || if on { upload::start(&pin2) } else { upload::stop() },
+                    move |a, r| {
+                        a.upload_busy = false;
+                        match r {
+                            Ok(()) => {
+                                a.upload_on = on;
+                                a.upload_pin = if on { pin } else { String::new() };
+                                a.message(if on { "WEBSERVER LÄUFT" } else { "WEBSERVER AUS" }, 3);
+                            }
+                            Err(e) => a.message(&format!("FEHLER: {e}"), 6),
+                        }
+                        a.ips = sys::ip_addrs();
+                        a.refresh();
+                    },
+                );
+                return;
             }
             (Page::Display, "term_big") => {
                 self.settings.term_big = !self.settings.term_big;
@@ -1459,6 +1537,157 @@ impl App {
         }
     }
 
+    // ---- update --------------------------------------------------------------
+
+    fn rows_update(&self) -> Vec<Row> {
+        let mut uts: libc::utsname = unsafe { std::mem::zeroed() };
+        unsafe { libc::uname(&mut uts) };
+        let kernel = unsafe { std::ffi::CStr::from_ptr(uts.release.as_ptr()) }.to_string_lossy().into_owned();
+        let p = &self.upd_progress;
+        let mut v = vec![
+            info("SYSTEM", &update::os_name().to_uppercase()),
+            info("KERNEL", &kernel),
+            info("ZULETZT GEPRÜFT", if self.upd_last_check.is_empty() { "NOCH NICHT" } else { &self.upd_last_check }),
+        ];
+        if p.running {
+            v.push(sep("UPDATE LÄUFT"));
+            let total = self.upd_total.max(p.done);
+            v.push(info("FORTSCHRITT", &if total > 0 { format!("{} / {} PAKETE", p.done, total) } else { format!("{} PAKETE", p.done) }));
+            v.push(info("", &p.last_line));
+            v.push(info("HINWEIS", "NICHT AUSSCHALTEN"));
+            return v;
+        }
+        let busy = self.upd_checking;
+        v.push(row("check", "AUF UPDATES PRÜFEN", if busy { "PRÜFE ..." } else { "" }, 0, !busy));
+        if let Some(pkgs) = &self.upd_pkgs {
+            v.push(info("VERFÜGBAR", &format!("{} PAKETE", pkgs.len())));
+            v.push(row("upgrade", "JETZT AKTUALISIEREN", "", 0, !pkgs.is_empty() && !busy));
+        }
+        if let Some(code) = p.exit {
+            v.push(info("LETZTES UPDATE", if code == 0 { "ERFOLGREICH" } else { "FEHLGESCHLAGEN" }));
+            if code != 0 && !p.last_line.is_empty() {
+                v.push(info("", &p.last_line));
+            }
+        }
+        if update::reboot_required() {
+            v.push(action("reboot", "NEUSTART", "EMPFOHLEN"));
+        }
+        if let Some(pkgs) = self.upd_pkgs.as_ref().filter(|p| !p.is_empty()) {
+            v.push(sep(&format!("PAKETE ({})", pkgs.len())));
+            for (name, ver) in pkgs.iter().take(60) {
+                v.push(info(name, ver));
+            }
+        }
+        v.push(sep("HINWEIS"));
+        v.push(info("KERNEL-VERSION", "BLEIBT (BOOT-EINTRAG)"));
+        v
+    }
+
+    fn update_check(&mut self) {
+        if self.upd_checking {
+            return;
+        }
+        self.upd_checking = true;
+        self.message("LADE PAKETLISTEN ...", 120);
+        self.refresh();
+        bg(update::check, |a, r| {
+            a.upd_checking = false;
+            let t = timecfg::now();
+            a.upd_last_check = format!("{:02}.{:02}. {:02}:{:02}", t.day, t.month, t.hour, t.minute);
+            match r {
+                Ok(p) => {
+                    a.message(&if p.is_empty() { "SYSTEM IST AKTUELL".to_string() } else { format!("{} UPDATES VERFÜGBAR", p.len()) }, 4);
+                    a.upd_pkgs = Some(p);
+                }
+                Err(e) => a.message(&format!("FEHLER: {e}"), 8),
+            }
+            a.refresh();
+        });
+    }
+
+    fn update_start(&mut self) {
+        self.upd_total = self.upd_pkgs.as_ref().map(|p| p.len()).unwrap_or(0);
+        self.message("UPDATE STARTET ...", 5);
+        bg(update::start, |a, r| {
+            match r {
+                Ok(()) => {
+                    a.upd_progress.running = true;
+                    a.upd_progress.exit = None;
+                }
+                Err(e) => a.message(&format!("FEHLER: {e}"), 8),
+            }
+            a.refresh();
+            a.update_poll();
+        });
+    }
+
+    fn update_poll(&mut self) {
+        if self.upd_poll_busy {
+            return;
+        }
+        self.upd_poll_busy = true;
+        bg(update::progress, |a, p| {
+            a.upd_poll_busy = false;
+            let finished = a.upd_progress.running && !p.running;
+            a.upd_progress = p;
+            if finished {
+                let ok = a.upd_progress.exit == Some(0);
+                a.message(if ok { "UPDATE ABGESCHLOSSEN" } else { "UPDATE FEHLGESCHLAGEN" }, 8);
+                // the list is stale now
+                a.upd_pkgs = None;
+            }
+            if matches!(a.page(), Page::Update | Page::Menu) {
+                a.refresh();
+            }
+        });
+    }
+
+    // ---- upload ----------------------------------------------------------------
+
+    fn rows_upload(&self) -> Vec<Row> {
+        let wlan_ip = self.ips.iter().find(|(d, _)| d.starts_with("wl")).or(self.ips.first()).map(|(_, ip)| ip.clone());
+        let mut v = vec![row("upl", "WEBSERVER", if self.upload_on { "AN" } else { "AUS" }, 1, !self.upload_busy)];
+        if self.upload_on {
+            v.push(info("ADRESSE", &match &wlan_ip {
+                Some(ip) => format!("http://{ip}:{}", upload::PORT),
+                None => "KEIN NETZ".into(),
+            }));
+            v.push(info("PIN", &self.upload_pin));
+        }
+        v.push(info("ORDNER", "~/games"));
+        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        if let Ok(c) = std::ffi::CString::new(upload::root()) {
+            if unsafe { libc::statvfs(c.as_ptr(), &mut st) } == 0 {
+                v.push(info("FREI", &sys::fmt_bytes(st.f_bavail as u64 * st.f_frsize as u64)));
+            }
+        }
+        v.push(sep("SO GEHT'S"));
+        v.push(info("1. BROWSER", "ADRESSE ÖFFNEN"));
+        v.push(info("2. PIN", "EINGEBEN"));
+        v.push(info("3. HOCHLADEN", "DATEIEN / ORDNER"));
+        v.push(info("SCUMMVM", "SPIELORDNER NACH SCUMMVM/"));
+        v.push(info("DANACH", "WEBSERVER AUSSCHALTEN"));
+        v
+    }
+
+    fn upload_poll(&mut self) {
+        bg(
+            || {
+                let on = upload::active();
+                (on, if on { upload::running_pin() } else { None })
+            },
+            |a, (on, pin)| {
+                a.upload_on = on;
+                if let Some(p) = pin {
+                    a.upload_pin = p;
+                }
+                if a.page() == Page::Upload {
+                    a.refresh();
+                }
+            },
+        );
+    }
+
     // ---- terminal --------------------------------------------------------
 
     /// (rows, cols, font px, char width px, line height px) of the terminal
@@ -1685,6 +1914,13 @@ impl App {
         if self.tick_n % 15 == 0 {
             self.poll_wifi();
         }
+        if self.tick_n % 2 == 0 && (self.upd_progress.running || self.page() == Page::Update) {
+            self.update_poll();
+        }
+        if self.tick_n % 10 == 0 && self.page() == Page::Upload {
+            self.ips = sys::ip_addrs();
+            self.upload_poll();
+        }
         if self.tick_n % 5 == 0 && self.page() == Page::Time {
             self.poll_time();
         }
@@ -1711,7 +1947,7 @@ impl App {
         }
         let sb = self.settings.standby_timeout as u64;
         let allowed = !(self.settings.standby_on_battery_only && self.bat.external_power());
-        if sb > 0 && idle >= sb && allowed && !self.standby && now > self.suspending_until {
+        if sb > 0 && idle >= sb && allowed && !self.standby && !self.upd_progress.running && now > self.suspending_until {
             self.suspend();
         }
 
@@ -1803,10 +2039,21 @@ fn main() {
         term_segs: term_segs.clone(),
         term_ctrl: false,
         term_redraw_pending: false,
+        upd_pkgs: None,
+        upd_checking: false,
+        upd_last_check: String::new(),
+        upd_progress: update::Progress::default(),
+        upd_total: 0,
+        upd_poll_busy: false,
+        upload_on: false,
+        upload_pin: String::new(),
+        upload_busy: false,
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {
         a.apply_led();
+        a.update_poll();
+        a.upload_poll();
         let (v, m) = (a.settings.volume, a.settings.muted);
         std::thread::spawn(move || audio::apply(v, m));
         a.cpu.sample();

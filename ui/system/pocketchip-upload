@@ -1,0 +1,287 @@
+#!/usr/bin/python3 -I
+"""Small file server for the PocketCHIP console (UPLOAD tile).
+
+Browse, download, upload (files and whole folders), create and delete inside
+one root folder, by default ~/games (emulator games). Every API call needs the
+PIN the console shows on its screen. Runs as the PocketCHIP user.
+
+Environment: UPLOAD_PIN (required), UPLOAD_PORT (8080), UPLOAD_ROOT (~/games)
+"""
+import json
+import os
+import shutil
+import sys
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PIN = os.environ.get("UPLOAD_PIN", "")
+PORT = int(os.environ.get("UPLOAD_PORT", "8080"))
+ROOT = os.path.realpath(os.path.expanduser(os.environ.get("UPLOAD_ROOT", "~/games")))
+CHUNK = 256 * 1024
+
+PAGE = """<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>C.H.I.P. // UPLOAD</title>
+<style>
+:root{--fg:#39ff6a;--dim:#1f8f3c;--bg:#000}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 "DejaVu Sans Mono",Menlo,Consolas,monospace}
+header{background:var(--fg);color:var(--bg);font-weight:700;padding:6px 10px;display:flex;justify-content:space-between}
+main{max-width:860px;margin:0 auto;padding:12px}
+.frame{border:1px solid var(--fg);outline:1px solid var(--dim);outline-offset:-4px;padding:12px;margin-bottom:12px}
+h2{font-size:13px;margin:0 0 8px;color:var(--dim);letter-spacing:.1em}
+button,label.btn,input{font:inherit;text-transform:uppercase;background:var(--bg);color:var(--fg);border:1px solid var(--fg);padding:6px 10px;margin:0 6px 6px 0;cursor:pointer}
+button:hover,label.btn:hover{background:var(--fg);color:var(--bg)}
+input[type=file]{display:none}
+input[type=password],input[type=text]{text-transform:none;cursor:text}
+table{width:100%;border-collapse:collapse}
+td{padding:4px 6px;border-bottom:1px solid #0c3a18;vertical-align:top}
+td.s{text-align:right;white-space:nowrap;color:var(--dim)}
+td.a{text-align:right;white-space:nowrap}
+a{color:var(--fg)}
+#crumbs a{margin-right:4px}
+#msg{min-height:1.4em}
+.bar{height:10px;border:1px solid var(--fg);margin-top:6px}
+.bar div{height:100%;background:var(--fg);width:0}
+.hidden{display:none}
+</style></head><body>
+<header><span>C.H.I.P. // UPLOAD</span><span id="free"></span></header>
+<main>
+<div id="login" class="frame hidden">
+ <h2>PIN</h2>
+ <p>DIE PIN STEHT AUF DEM BILDSCHIRM DES POCKETCHIP UNTER UPLOAD.</p>
+ <input id="pin" type="password" inputmode="numeric" autocomplete="off">
+ <button onclick="login()">OK</button>
+</div>
+<div id="app" class="hidden">
+ <div class="frame">
+  <h2>ORDNER</h2>
+  <div id="crumbs"></div>
+ </div>
+ <div class="frame">
+  <h2>HOCHLADEN</h2>
+  <label class="btn">DATEIEN<input id="files" type="file" multiple onchange="upload(this.files)"></label>
+  <label class="btn">ORDNER<input id="dir" type="file" webkitdirectory multiple onchange="upload(this.files)"></label>
+  <button onclick="mkdir()">NEUER ORDNER</button>
+  <div id="msg"></div>
+  <div class="bar"><div id="bar"></div></div>
+ </div>
+ <div class="frame">
+  <h2>INHALT</h2>
+  <table id="list"></table>
+ </div>
+</div>
+</main>
+<script>
+let pin = localStorage.getItem("pcpin") || "";
+let cwd = "";
+const $ = id => document.getElementById(id);
+function api(method, path, body, onprogress) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open(method, path);
+    x.setRequestHeader("X-Pin", pin);
+    if (onprogress) x.upload.onprogress = onprogress;
+    x.onload = () => x.status < 300 ? res(x.responseText) : rej(x.status === 401 ? "PIN" : x.responseText || x.status);
+    x.onerror = () => rej("VERBINDUNG");
+    x.send(body);
+  });
+}
+const q = p => encodeURIComponent(p);
+const join = (a, b) => a ? a + "/" + b : b;
+function size(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : n > 1024 ? (n / 1024).toFixed(0) + " KB" : n + " B"; }
+function esc(s) { return s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function msg(t) { $("msg").textContent = t; }
+function login() { pin = $("pin").value.trim(); localStorage.setItem("pcpin", pin); load(""); }
+async function load(path) {
+  try {
+    const d = JSON.parse(await api("GET", "/api/list?path=" + q(path)));
+    cwd = d.path;
+    $("login").classList.add("hidden"); $("app").classList.remove("hidden");
+    $("free").textContent = size(d.free) + " FREI";
+    let c = '<a href="#" onclick="load(\\'\\');return false">GAMES</a>';
+    let acc = "";
+    for (const part of cwd ? cwd.split("/") : []) { acc = join(acc, part); c += ' / <a href="#" data-p="' + esc(acc) + '" onclick="load(this.dataset.p);return false">' + esc(part.toUpperCase()) + '</a>'; }
+    $("crumbs").innerHTML = c;
+    let rows = "";
+    if (cwd) rows += '<tr><td><a href="#" onclick="load(\\'' + "" + '\\');return false" data-up="1">..</a></td><td></td><td></td></tr>';
+    for (const e of d.entries) {
+      const p = join(cwd, e.name);
+      const name = e.dir
+        ? '<a href="#" data-p="' + esc(p) + '" onclick="load(this.dataset.p);return false">' + esc(e.name) + '/</a>'
+        : '<a href="/dl?path=' + q(p) + '&pin=' + q(pin) + '">' + esc(e.name) + '</a>';
+      rows += '<tr><td>' + name + '</td><td class="s">' + (e.dir ? "ORDNER" : size(e.size)) + '</td><td class="a"><button data-p="' + esc(p) + '" onclick="del(this.dataset.p)">LÖSCHEN</button></td></tr>';
+    }
+    $("list").innerHTML = rows || '<tr><td>LEER</td></tr>';
+    const up = document.querySelector("[data-up]");
+    if (up) up.onclick = () => { load(cwd.split("/").slice(0, -1).join("/")); return false; };
+  } catch (e) {
+    if (e === "PIN") { $("app").classList.add("hidden"); $("login").classList.remove("hidden"); if (pin) msg(""); }
+    else msg("FEHLER: " + e);
+  }
+}
+async function upload(files) {
+  const list = Array.from(files);
+  let total = list.reduce((s, f) => s + f.size, 0) || 1, done = 0;
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i];
+    const rel = join(cwd, f.webkitRelativePath || f.name);
+    msg("LADE " + (i + 1) + "/" + list.length + ": " + rel);
+    try {
+      await api("PUT", "/api/upload?path=" + q(rel), f, ev => { $("bar").style.width = (100 * (done + ev.loaded) / total) + "%"; });
+    } catch (e) { msg("FEHLER BEI " + rel + ": " + e); return; }
+    done += f.size;
+  }
+  $("bar").style.width = "100%";
+  msg(list.length + " DATEI(EN) HOCHGELADEN");
+  $("files").value = ""; $("dir").value = "";
+  load(cwd);
+}
+async function mkdir() {
+  const n = prompt("NAME DES NEUEN ORDNERS:");
+  if (!n) return;
+  try { await api("POST", "/api/mkdir?path=" + q(join(cwd, n))); load(cwd); } catch (e) { msg("FEHLER: " + e); }
+}
+async function del(p) {
+  if (!confirm(p + " WIRKLICH LÖSCHEN? (ORDNER MIT INHALT)")) return;
+  try { await api("POST", "/api/delete?path=" + q(p)); load(cwd); } catch (e) { msg("FEHLER: " + e); }
+}
+load("");
+</script></body></html>
+"""
+
+
+def safe_path(rel, must_exist=True):
+    rel = (rel or "").strip().lstrip("/")
+    full = os.path.realpath(os.path.join(ROOT, rel))
+    if full != ROOT and not full.startswith(ROOT + os.sep):
+        return None
+    if must_exist and not os.path.exists(full):
+        return None
+    return full
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "pocketchip-upload"
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
+
+    def query(self):
+        u = urllib.parse.urlsplit(self.path)
+        return u.path, dict(urllib.parse.parse_qsl(u.query))
+
+    def authed(self, q):
+        return PIN and (self.headers.get("X-Pin") == PIN or q.get("pin") == PIN)
+
+    def reply(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=None):
+        if isinstance(body, str):
+            body = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def do_GET(self):
+        path, q = self.query()
+        if path in ("/", "/index.html"):
+            return self.reply(200, PAGE, "text/html; charset=utf-8")
+        if not self.authed(q):
+            return self.reply(401, "PIN")
+        if path == "/api/list":
+            full = safe_path(q.get("path"))
+            if not full or not os.path.isdir(full):
+                return self.reply(404, "NICHT GEFUNDEN")
+            entries = []
+            for name in sorted(os.listdir(full), key=str.lower):
+                p = os.path.join(full, name)
+                if name.endswith(".part"):
+                    continue
+                isdir = os.path.isdir(p)
+                entries.append({"name": name, "dir": isdir, "size": 0 if isdir else os.path.getsize(p)})
+            entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+            st = os.statvfs(full)
+            rel = os.path.relpath(full, ROOT)
+            body = {"path": "" if rel == "." else rel, "entries": entries, "free": st.f_bavail * st.f_frsize}
+            return self.reply(200, json.dumps(body), "application/json")
+        if path == "/dl":
+            full = safe_path(q.get("path"))
+            if not full or not os.path.isfile(full):
+                return self.reply(404, "NICHT GEFUNDEN")
+            name = os.path.basename(full)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(os.path.getsize(full)))
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + urllib.parse.quote(name))
+            self.end_headers()
+            with open(full, "rb") as f:
+                shutil.copyfileobj(f, self.wfile, CHUNK)
+            return
+        return self.reply(404, "NICHT GEFUNDEN")
+
+    def do_PUT(self):
+        path, q = self.query()
+        if not self.authed(q):
+            return self.reply(401, "PIN")
+        if path != "/api/upload":
+            return self.reply(404, "NICHT GEFUNDEN")
+        full = safe_path(q.get("path"), must_exist=False)
+        if not full or full == ROOT or os.path.isdir(full):
+            return self.reply(400, "UNGUELTIGER PFAD")
+        length = int(self.headers.get("Content-Length", "0"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        part = full + ".part"
+        left = length
+        with open(part, "wb") as f:
+            while left > 0:
+                data = self.rfile.read(min(CHUNK, left))
+                if not data:
+                    break
+                f.write(data)
+                left -= len(data)
+        if left:
+            os.unlink(part)
+            return self.reply(400, "UPLOAD ABGEBROCHEN")
+        os.replace(part, full)
+        return self.reply(200, "OK")
+
+    def do_POST(self):
+        path, q = self.query()
+        if not self.authed(q):
+            return self.reply(401, "PIN")
+        if path == "/api/mkdir":
+            full = safe_path(q.get("path"), must_exist=False)
+            if not full or full == ROOT:
+                return self.reply(400, "UNGUELTIGER PFAD")
+            os.makedirs(full, exist_ok=True)
+            return self.reply(200, "OK")
+        if path == "/api/delete":
+            full = safe_path(q.get("path"))
+            if not full or full == ROOT:
+                return self.reply(400, "UNGUELTIGER PFAD")
+            if os.path.isdir(full) and not os.path.islink(full):
+                shutil.rmtree(full)
+            else:
+                os.unlink(full)
+            return self.reply(200, "OK")
+        return self.reply(404, "NICHT GEFUNDEN")
+
+
+def main():
+    if not PIN:
+        sys.exit("UPLOAD_PIN fehlt")
+    os.makedirs(ROOT, exist_ok=True)
+    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    srv.daemon_threads = True
+    print("pocketchip-upload: %s on port %d" % (ROOT, PORT), flush=True)
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

@@ -11,6 +11,7 @@ ssh "$HOST" 'mkdir -p /tmp/pcc-install'
 scp -q "$BIN" "$ROOT/system/pocketchip-console.service" "$ROOT/system/90-pocketchip-touch-libinput.rules" \
     "$ROOT/system/pocketchip-bt-fix" "$ROOT/system/pocketchip-bt-fix.service" \
     "$ROOT/system/pocketchip-battery-guard" "$ROOT/system/pocketchip-battery-guard.service" \
+    "$ROOT/system/pocketchip-update" "$ROOT/system/pocketchip-upload" \
     "$ROOT/system/firmware/rtl8723bs_config.bin" \
     "$ROOT/system/pocketchip-emu@.service" "$ROOT/system/pocketchip-emu-helper.service" "$ROOT/system/pocketchip-emu-run" "$ROOT/system/pocketchip-emu-helper" \
     "$HOST:/tmp/pcc-install/"
@@ -29,6 +30,13 @@ sudo udevadm control --reload
 sudo install -D -m 0644 rtl8723bs_config.bin /lib/firmware/updates/rtl_bt/rtl8723bs_config.bin
 sudo install -m 0755 pocketchip-bt-fix /usr/local/sbin/
 sudo install -m 0644 pocketchip-bt-fix.service /etc/systemd/system/
+# EINSTELLUNGEN > UPDATE (apt) and the UPLOAD file server
+sudo install -m 0755 pocketchip-update /usr/local/sbin/
+sudo install -d /usr/local/lib/pocketchip-console
+sudo install -m 0755 pocketchip-upload /usr/local/lib/pocketchip-console/
+# extlinux.conf names the kernel with its version and nothing rewrites it:
+# keep apt from installing a new kernel ABI that would never be booted
+if dpkg -s linux-image-armmp >/dev/null 2>&1; then sudo apt-mark hold linux-image-armmp >/dev/null; fi
 # low battery: power off even when the console is not running
 sudo install -m 0755 pocketchip-battery-guard /usr/local/sbin/
 sudo install -m 0644 pocketchip-battery-guard.service /etc/systemd/system/
