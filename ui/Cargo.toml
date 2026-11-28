@@ -19,6 +19,7 @@ slint = { version = "1.19", default-features = false, features = ["std", "compat
 libc = "0.2"
 png = "0.18"
 vt100 = "0.18"
+zbus = "5"
 
 [build-dependencies]
 slint-build = "1.19"
@@ -29,3 +30,7 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# the radar picture is drawn per pixel in our own code: optimise it for speed
+[profile.release.package.pocketchip-console]
+opt-level = 3

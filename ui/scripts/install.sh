@@ -49,6 +49,8 @@ sudo install -m 0644 pocketchip-emu-helper.service /etc/systemd/system/
 sudo rm -f /etc/systemd/system/pocketchip-emu-touch.service /usr/local/lib/pocketchip-console/pocketchip-emu-touch
 sed "s/^User=chip$/User=$u/" pocketchip-emu@.service | sudo tee /etc/systemd/system/pocketchip-emu@.service >/dev/null
 dpkg -s scummvm >/dev/null 2>&1 || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends scummvm
+# BT-RADAR: vendor names of public Bluetooth addresses (IEEE OUI list)
+dpkg -s ieee-data >/dev/null 2>&1 || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ieee-data
 sudo systemctl daemon-reload
 if [ "$ENABLE" != "--no-enable" ]; then
   # boot into the console; the getty@tty1 autologin shell only on demand

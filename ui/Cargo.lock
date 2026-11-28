@@ -3032,6 +3032,7 @@ dependencies = [
  "slint",
  "slint-build",
  "vt100",
+ "zbus",
 ]
 
 [[package]]

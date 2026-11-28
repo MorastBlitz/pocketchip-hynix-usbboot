@@ -1,8 +1,10 @@
 mod audio;
 mod bt;
+mod btscan;
 mod debug;
 mod hw;
 mod led;
+mod radar;
 mod settings;
 mod sys;
 mod term;
@@ -16,6 +18,7 @@ mod wifi;
 use settings::{fmt_percent_or_never, fmt_timeout, step, Settings, BATTERY_OFF_STEPS, BATTERY_WARN_STEPS, SCREEN_STEPS, STANDBY_STEPS};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
@@ -45,6 +48,9 @@ enum Page {
     TzRegion,
     TzCity(String),
     BtDevice(String),
+    Radar,
+    /// radar detail page, by D-Bus object path
+    RadarDev(String),
 }
 
 impl Page {
@@ -69,6 +75,8 @@ impl Page {
             Page::TzRegion => "ZEITZONE".into(),
             Page::TzCity(r) => format!("ZEITZONE / {}", r.to_uppercase()),
             Page::BtDevice(_) => "BLUETOOTH / GERÄT".into(),
+            Page::Radar => "BT-RADAR".into(),
+            Page::RadarDev(_) => "BT-RADAR / GERÄT".into(),
         }
     }
 }
@@ -133,6 +141,17 @@ fn help_rows() -> Vec<Row> {
         ("SHIFT + +", "="),
         ("SHIFT + -", "_"),
         ("SHIFT + /", "?"),
+    ] {
+        v.push(info(k, d));
+    }
+    v.push(sep("BT-RADAR"));
+    for (k, d) in [
+        ("ENTFERNUNG", "GESCHÄTZT AUS SIGNALSTÄRKE"),
+        ("RICHTUNG", "NICHT MESSBAR"),
+        ("WINKEL DER PUNKTE", "ERFUNDEN, FEST JE GERÄT"),
+        ("NAH / MITTEL / FERN", "> -60 / -75 / -88 DBM"),
+        ("PUNKT ANTIPPEN", "DETAILS"),
+        ("AUSGEBLENDET", "NACH 30-60 S OHNE SIGNAL"),
     ] {
         v.push(info(k, d));
     }
@@ -206,6 +225,21 @@ struct App {
     upload_on: bool,
     upload_pin: String,
     upload_busy: bool,
+    radar_scan: Option<btscan::Scanner>,
+    radar_started: u64,
+    radar_renderer: Option<radar::Renderer>,
+    radar_timer: slint::Timer,
+    radar_blips: Vec<radar::Blip>,
+    radar_devs: Vec<(btscan::Dev, i16)>,
+    radar_sel: Option<String>,
+    radar_items: Rc<VecModel<RadarItem>>,
+    radar_tiles: Rc<VecModel<slint::Image>>,
+    radar_prev_trail: u64,
+    radar_frame_n: u64,
+    radar_static_at: u64,
+    /// repaint all tiles with the next frame
+    radar_full: bool,
+    oui_cache: HashMap<String, Option<String>>,
 }
 
 /// Exit code of the pause menu: 0 resume, 10 quit the emulator.
@@ -291,6 +325,13 @@ impl App {
                 self.upload_poll();
             }
             Page::Update => self.update_poll(),
+            Page::Radar => {
+                self.radar_full = true;
+                self.radar_sync();
+                self.radar_update();
+                self.radar_frame();
+            }
+            Page::RadarDev(key) => self.radar_oui(key.clone()),
             Page::BtDevice(mac) => {
                 self.bt_dev = None;
                 self.poll_bt_dev(mac.clone());
@@ -321,7 +362,8 @@ impl App {
         be.set_depth((self.stack.len() - 1) as i32);
         be.set_home(page == Page::Home);
         be.set_term(page == Page::Term);
-        be.set_plain(page == Page::Help);
+        be.set_plain(page == Page::Help || page == Page::Radar);
+        be.set_radar(page == Page::Radar);
         if self.rows.row_count() == rows.len() {
             for (i, r) in rows.iter().enumerate() {
                 if self.rows.row_data(i).as_ref() != Some(r) {
@@ -349,6 +391,7 @@ impl App {
             top.1 = sel;
         }
         be.set_sel(sel);
+        self.radar_sync();
     }
 
     fn default_sel(&self, page: &Page, rows: &[Row]) -> i32 {
@@ -371,7 +414,10 @@ impl App {
                 action("emus", "EMULATOREN", ""),
                 action("upload", "UPLOAD", ""),
                 action("help", "HILFE", ""),
+                action("radar", "BT-RADAR", ""),
             ],
+            Page::Radar => Vec::new(),
+            Page::RadarDev(key) => self.rows_radar_dev(key),
             Page::Term => Vec::new(),
             Page::Help => help_rows(),
             Page::Update => self.rows_update(),
@@ -869,6 +915,8 @@ impl App {
             (Page::Home, "term") => self.push(Page::Term),
             (Page::Home, "help") => self.push(Page::Help),
             (Page::Home, "upload") => self.push(Page::Upload),
+            (Page::Home, "radar") => self.push(Page::Radar),
+            (Page::RadarDev(_), "bt_settings") | (Page::Radar, "bt_settings") => self.push(Page::Bt),
             (Page::Menu, "update") => self.push(Page::Update),
             (Page::Update, "check") => self.update_check(),
             (Page::Update, "upgrade") => {
@@ -1434,6 +1482,7 @@ impl App {
             self.be().set_screen_off(true);
             self.backlight.power(false);
         }
+        self.radar_sync();
     }
 
     // ---- touch calibration ----------------------------------------------------
@@ -1538,6 +1587,287 @@ impl App {
     }
 
     // ---- update --------------------------------------------------------------
+
+    // ---- Bluetooth radar -------------------------------------------------------
+
+    fn radar_wanted(&self) -> bool {
+        matches!(self.page(), Page::Radar | Page::RadarDev(_)) && !self.screen_off && !self.standby
+    }
+
+    /// Start/stop the LE scan and the beam animation to match the page and
+    /// the display state. Never changes the Bluetooth power state.
+    fn radar_sync(&mut self) {
+        let now = mono_ms();
+        if self.radar_wanted() {
+            let retry = self.radar_scan.as_ref().map(|s| s.finished() && now > self.radar_started + 5000).unwrap_or(true);
+            if retry {
+                self.radar_scan = Some(btscan::Scanner::start());
+                self.radar_started = now;
+            }
+        } else if let Some(s) = self.radar_scan.take() {
+            s.stop();
+        }
+        let animate = self.radar_wanted() && self.page() == Page::Radar;
+        if animate && !self.radar_timer.running() {
+            self.radar_timer.start(slint::TimerMode::Repeated, Duration::from_millis(radar::FRAME_MS), || with_app(|a| a.radar_frame()));
+        } else if !animate && self.radar_timer.running() {
+            self.radar_timer.stop();
+        }
+    }
+
+    /// Pull the devices from the scanner (once a second).
+    fn radar_update(&mut self) {
+        let now = mono_ms();
+        let Some(scan) = self.radar_scan.as_ref() else { return };
+        let status = scan.status();
+        let mut devs: Vec<(btscan::Dev, i16)> = scan
+            .snapshot()
+            .into_iter()
+            .filter(|d| !d.gone && now.saturating_sub(d.last_seen) <= radar::STALE_MS)
+            .filter_map(|d| {
+                let r = d.rssi_smooth(now, radar::SMOOTH_MS)?;
+                Some((d, r))
+            })
+            .collect();
+        if status != btscan::Status::Scanning {
+            devs.clear();
+        }
+        devs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.addr.cmp(&b.0.addr)));
+        self.radar_blips = devs
+            .iter()
+            .map(|(d, r)| {
+                let angle = radar::angle_of(&d.addr);
+                let (x, y) = radar::blip_pos(angle, radar::radius_frac(*r));
+                radar::Blip { key: d.path.clone(), x, y, angle, first: d.first_seen, fresh: now.saturating_sub(d.last_seen) < radar::FRESH_MS }
+            })
+            .collect();
+        let items: Vec<RadarItem> = devs
+            .iter()
+            .map(|(d, r)| {
+                let mut info = radar::zone(*r).to_string();
+                if let Some(m) = radar::distance_m(*r, d.tx_power) {
+                    info += &format!(" · {}", radar::fmt_distance(m));
+                }
+                if !d.name.is_empty() {
+                    if let Some(t) = radar::dev_type(d) {
+                        info += &format!(" · {t}");
+                    } else if let Some(m) = d.manuf.first() {
+                        info += &format!(" · {}", radar::company_short(m.0).to_uppercase());
+                    }
+                } else if d.addr.len() >= 8 && radar::label(d) != d.addr {
+                    // tell nameless devices apart
+                    info += &format!(" · …{}", &d.addr[d.addr.len() - 5..]);
+                }
+                RadarItem {
+                    id: d.path.clone().into(),
+                    name: radar::label(d).into(),
+                    rssi: r.to_string().into(),
+                    info: info.into(),
+                    fresh: now.saturating_sub(d.last_seen) < radar::FRESH_MS,
+                }
+            })
+            .collect();
+        let ui = self.ui.clone_strong();
+        let be = ui.global::<Backend>();
+        let note = match &status {
+            btscan::Status::Starting => "SUCHE STARTET ...".to_string(),
+            btscan::Status::Scanning if devs.is_empty() && now > self.radar_started + 8000 => "KEINE GERÄTE\nIN REICHWEITE".into(),
+            btscan::Status::Scanning => String::new(),
+            btscan::Status::BtOff => "BLUETOOTH IST AUS\nEINSTELLUNGEN › BLUETOOTH".into(),
+            btscan::Status::NoAdapter => "KEIN BLUETOOTH-ADAPTER".into(),
+            btscan::Status::NoService => "BLUETOOTH-DIENST\nLÄUFT NICHT".into(),
+            btscan::Status::Error(e) => format!("FEHLER\n{}", e.to_uppercase()),
+        };
+        be.set_radar_note(note.into());
+        be.set_radar_head(match devs.len() {
+            1 => "1 GERÄT".into(),
+            n => format!("{n} GERÄTE").into(),
+        });
+        // keep the selection on the same device while the order changes
+        let sel = self.radar_sel.as_ref().and_then(|k| devs.iter().position(|(d, _)| &d.path == k));
+        let sel = match sel {
+            Some(i) => i,
+            None => {
+                self.radar_sel = devs.first().map(|(d, _)| d.path.clone());
+                0
+            }
+        };
+        if self.radar_items.row_count() == items.len() {
+            for (i, it) in items.iter().enumerate() {
+                if self.radar_items.row_data(i).as_ref() != Some(it) {
+                    self.radar_items.set_row_data(i, it.clone());
+                }
+            }
+        } else {
+            self.radar_items.set_vec(items);
+        }
+        be.set_radar_sel(sel as i32);
+        self.radar_devs = devs;
+    }
+
+    fn radar_frame(&mut self) {
+        let now = mono_ms();
+        let active = self.radar_scan.as_ref().map(|s| s.status() == btscan::Status::Scanning).unwrap_or(false);
+        // without a scan the picture is static: redraw it once a second
+        if !active && !self.radar_full && now < self.radar_static_at + 1000 {
+            return;
+        }
+        self.radar_static_at = now;
+        let sweep = ((now % radar::PERIOD_MS) * 65536 / radar::PERIOD_MS) as u16;
+        let r = self.radar_renderer.get_or_insert_with(radar::Renderer::new);
+        r.frame(sweep, now, &self.radar_blips, self.radar_sel.as_deref(), active);
+        // Tiles under the beam (and those it just left) every frame, all
+        // tiles every eighth frame for the fading blips. Note: Slint's DRM
+        // backend uses three buffers, so its software renderer currently
+        // repaints the whole screen on every change anyway; the tiles only
+        // pay off once it does partial repaints there.
+        let trail = if active { radar::Renderer::trail_sectors(sweep) } else { 0 };
+        let mask = trail | self.radar_prev_trail;
+        self.radar_prev_trail = trail;
+        self.radar_frame_n += 1;
+        let full = self.radar_tiles.row_count() != radar::TILES || self.radar_full || !active;
+        self.radar_full = false;
+        if self.radar_tiles.row_count() != radar::TILES {
+            self.radar_tiles.set_vec(vec![slint::Image::default(); radar::TILES]);
+        }
+        for t in 0..radar::TILES {
+            if full || r.tile_sectors(t) & mask != 0 || self.radar_frame_n % 8 == 0 {
+                self.radar_tiles.set_row_data(t, slint::Image::from_rgb8(r.tile(t)));
+            }
+        }
+    }
+
+    fn radar_tap(&mut self, x: f32, y: f32) {
+        let x = x - radar::OFFSET_X;
+        let best = self
+            .radar_blips
+            .iter()
+            .map(|b| (b, (b.x - x).powi(2) + (b.y - y).powi(2)))
+            .filter(|(_, d)| *d <= 18.0 * 18.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(b, _)| b.key.clone());
+        if let Some(k) = best {
+            self.radar_sel = Some(k.clone());
+            self.push(Page::RadarDev(k));
+        } else if self.be().get_radar_note().contains("BLUETOOTH IST AUS") {
+            self.push(Page::Bt);
+        }
+    }
+
+    /// Vendor lookup for public addresses (reads the IEEE list once per device).
+    fn radar_oui(&mut self, key: String) {
+        let Some(d) = self.radar_scan.as_ref().and_then(|s| s.device(&key)) else { return };
+        if d.addr_type == "random" || d.addr.is_empty() || self.oui_cache.contains_key(&d.addr) {
+            return;
+        }
+        let addr = d.addr.clone();
+        bg(
+            move || {
+                let v = radar::oui_vendor(&addr);
+                (addr, v)
+            },
+            |a, (addr, v)| {
+                a.oui_cache.insert(addr, v);
+                a.refresh();
+            },
+        );
+    }
+
+    fn rows_radar_dev(&self, key: &str) -> Vec<Row> {
+        let live = self.radar_scan.as_ref().and_then(|s| s.device(key));
+        let Some(d) = live.or_else(|| self.radar_devs.iter().find(|(d, _)| d.path == key).map(|x| x.0.clone())) else {
+            return vec![info("STATUS", "GERÄT NICHT MEHR DA")];
+        };
+        let now = mono_ms();
+        let yn = |b: bool| if b { "JA" } else { "NEIN" };
+        let mut v = vec![sep("GERÄT")];
+        v.push(info("NAME", if d.name.is_empty() { "–" } else { &d.name }));
+        if !d.alias.is_empty() && d.alias != d.name && d.alias.replace('-', ":") != d.addr {
+            v.push(info("ALIAS", &d.alias));
+        }
+        v.push(info("ADRESSE", &d.addr));
+        v.push(info("ADRESSTYP", radar::addr_type_de(&d)));
+        if d.addr_type != "random" {
+            let vendor = match self.oui_cache.get(&d.addr) {
+                None => "SUCHE ...".to_string(),
+                Some(Some(n)) => n.clone(),
+                Some(None) if std::path::Path::new("/usr/share/ieee-data/oui.txt").exists() => "UNBEKANNT".into(),
+                Some(None) => "LISTE FEHLT (IEEE-DATA)".into(),
+            };
+            v.push(info("HERSTELLER (OUI)", &vendor));
+        }
+        v.push(info("GERÄTETYP", &radar::dev_type(&d).unwrap_or_else(|| "UNBEKANNT".into())));
+        if let Some(k) = radar::apple_kind_of(&d) {
+            v.push(info("APPLE-SIGNAL", k));
+        }
+        if let Some(a) = d.appearance {
+            v.push(info("APPEARANCE", &format!("0x{a:04X}")));
+        }
+        if let Some(c) = d.class {
+            v.push(info("GERÄTEKLASSE", &format!("0x{c:06X}")));
+        }
+
+        v.push(sep("SIGNAL"));
+        let cur = d.rssi.back().map(|s| s.1);
+        let smooth = d.rssi_smooth(now, radar::SMOOTH_MS);
+        v.push(info("RSSI", &cur.map(|r| format!("{r} DBM")).unwrap_or_else(|| "–".into())));
+        if let Some(s) = smooth {
+            v.push(info("RSSI GEGLÄTTET", &format!("{s} DBM (MEDIAN)")));
+        }
+        let hist: Vec<i16> = d.rssi.iter().rev().take(26).rev().map(|s| s.1).collect();
+        if !hist.is_empty() {
+            v.push(info("VERLAUF", &radar::sparkline(&hist)));
+        }
+        v.push(info("TXPOWER", &d.tx_power.map(|t| format!("{t} DBM")).unwrap_or_else(|| "–".into())));
+        if let Some(s) = smooth {
+            v.push(info("ZONE", radar::zone(s)));
+            v.push(info(
+                "ENTFERNUNG",
+                &radar::distance_m(s, d.tx_power).map(|m| format!("{} (GESCHÄTZT)", radar::fmt_distance(m))).unwrap_or_else(|| "NUR ZONE (KEIN TXPOWER)".into()),
+            ));
+        }
+        v.push(info("RICHTUNG", "NICHT MESSBAR"));
+
+        if !d.manuf.is_empty() {
+            v.push(sep("HERSTELLERDATEN"));
+            for (id, data) in &d.manuf {
+                v.push(info(&format!("0x{id:04X}"), &radar::company(*id)));
+                for (i, l) in radar::hex_lines(data, 12).iter().enumerate() {
+                    v.push(info(if i == 0 { "  DATEN" } else { "" }, l));
+                }
+            }
+        }
+        if !d.uuids.is_empty() {
+            v.push(sep(&format!("DIENSTE ({})", d.uuids.len())));
+            for u in &d.uuids {
+                v.push(info(radar::uuid_name(u).unwrap_or("UNBEKANNT"), &radar::uuid_short(u)));
+            }
+        }
+        if !d.svc_data.is_empty() {
+            v.push(sep("DIENSTDATEN"));
+            for (u, data) in &d.svc_data {
+                v.push(info(radar::uuid_name(u).unwrap_or("UNBEKANNT"), &radar::uuid_short(u)));
+                for (i, l) in radar::hex_lines(data, 12).iter().enumerate() {
+                    v.push(info(if i == 0 { "  DATEN" } else { "" }, l));
+                }
+            }
+        }
+
+        v.push(sep("STATUS"));
+        v.push(info("GEKOPPELT", yn(d.paired)));
+        v.push(info("VERBUNDEN", yn(d.connected)));
+        v.push(info("VERTRAUT", yn(d.trusted)));
+        v.push(info("BLOCKIERT", yn(d.blocked)));
+
+        v.push(sep("GESEHEN"));
+        v.push(info("ZUERST", &fmt_wall(d.first_wall)));
+        v.push(info("ZULETZT", &format!("{} (VOR {} S)", fmt_wall(d.last_wall), now.saturating_sub(d.last_seen) / 1000)));
+        v.push(sep("HINWEIS"));
+        v.push(info("RICHTUNG", "NICHT MESSBAR"));
+        v.push(info("NUR ENTFERNUNG", "GESCHÄTZT"));
+        v.push(info("WINKEL AUF DEM RADAR", "ERFUNDEN"));
+        v
+    }
 
     fn rows_update(&self) -> Vec<Row> {
         let mut uts: libc::utsname = unsafe { std::mem::zeroed() };
@@ -1935,6 +2265,10 @@ impl App {
                 self.poll_bt_dev(m);
             }
         }
+        if matches!(self.page(), Page::Radar | Page::RadarDev(_)) {
+            self.radar_sync();
+            self.radar_update();
+        }
         if self.tick_n % 10 == 0 && self.page() == Page::Status {
             self.ips = sys::ip_addrs();
         }
@@ -1953,7 +2287,7 @@ impl App {
 
         // pages with live values
         match self.page() {
-            Page::Menu | Page::Status | Page::Battery | Page::Time | Page::Overlay(_) => {
+            Page::Menu | Page::Status | Page::Battery | Page::Time | Page::Overlay(_) | Page::RadarDev(_) => {
                 if !self.be().get_dialog_open() {
                     self.refresh()
                 }
@@ -1961,6 +2295,17 @@ impl App {
             _ => {}
         }
     }
+}
+
+/// Local time of day for a unix timestamp.
+fn fmt_wall(t: i64) -> String {
+    if t <= 0 {
+        return "–".into();
+    }
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let tt = t as libc::time_t;
+    unsafe { libc::localtime_r(&tt, &mut tm) };
+    format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
 }
 
 fn main() {
@@ -1985,9 +2330,13 @@ fn main() {
 
     let rows = Rc::new(VecModel::<Row>::default());
     let term_segs = Rc::new(VecModel::<TermSeg>::default());
+    let radar_items = Rc::new(VecModel::<RadarItem>::default());
+    let radar_tiles = Rc::new(VecModel::<slint::Image>::default());
     let be = ui.global::<Backend>();
     be.set_rows(ModelRc::from(rows.clone()));
     be.set_term_segs(ModelRc::from(term_segs.clone()));
+    be.set_radar_items(ModelRc::from(radar_items.clone()));
+    be.set_radar_tiles(ModelRc::from(radar_tiles.clone()));
     be.set_scanlines(settings.scanlines);
 
     be.on_activate(|id| with_app(move |a| a.activate(id.to_string())));
@@ -1999,6 +2348,14 @@ fn main() {
     be.on_term_key(|t, ctrl| with_app(move |a| a.term_key(t.to_string(), ctrl)));
     be.on_term_soft(|id| with_app(move |a| a.term_soft(id.to_string())));
     be.on_term_scroll(|n| with_app(move |a| a.term_scroll(n)));
+    be.on_radar_tap(|x, y| with_app(move |a| a.radar_tap(x, y)));
+    be.on_radar_select(|id| {
+        with_app(move |a| {
+            a.radar_sel = Some(id.to_string());
+            a.radar_full = true;
+        })
+    });
+    be.on_radar_open(|id| with_app(move |a| a.push(Page::RadarDev(id.to_string()))));
     be.on_calib_cancel(|| with_app(|a| a.calib_cancel()));
     be.on_key_activity(|| hw::LAST_ACTIVITY.store(mono_ms(), Ordering::Relaxed));
 
@@ -2048,6 +2405,20 @@ fn main() {
         upload_on: false,
         upload_pin: String::new(),
         upload_busy: false,
+        radar_scan: None,
+        radar_started: 0,
+        radar_renderer: None,
+        radar_timer: slint::Timer::default(),
+        radar_blips: Vec::new(),
+        radar_devs: Vec::new(),
+        radar_sel: None,
+        radar_items: radar_items.clone(),
+        radar_tiles: radar_tiles.clone(),
+        radar_prev_trail: 0,
+        radar_frame_n: 0,
+        radar_static_at: 0,
+        radar_full: true,
+        oui_cache: HashMap::new(),
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {

@@ -13,6 +13,14 @@ export struct Row {
     enabled: bool,
 }
 
+export struct RadarItem {
+    id: string,
+    name: string,
+    rssi: string,
+    info: string,
+    fresh: bool,
+}
+
 export struct TermSeg {
     row: int,
     col: int,
@@ -190,6 +198,16 @@ export global Backend {
     in property <length> term-font: 12px;
     in property <length> term-cw: 7.2246px;
     in property <length> term-lh: 14px;
+    // Bluetooth radar
+    in property <bool> radar: false;
+    in property <[image]> radar-tiles;
+    in property <string> radar-note;
+    in property <string> radar-head;
+    in property <[RadarItem]> radar-items;
+    in-out property <int> radar-sel: 0;
+    callback radar-tap(float, float);
+    callback radar-select(string);
+    callback radar-open(string);
     callback term-key(string, bool);
     callback term-soft(string);
     callback term-scroll(int);
@@ -248,7 +266,7 @@ component HomeTile inherits Rectangle {
         x: (parent.width - self.width) / 2;
         width: 50px;
         height: 50px;
-        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : item.id == "term" ? @image-url("../assets/terminal.svg") : item.id == "help" ? @image-url("../assets/help.svg") : item.id == "upload" ? @image-url("../assets/upload.svg") : @image-url("../assets/gear.svg");
+        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : item.id == "term" ? @image-url("../assets/terminal.svg") : item.id == "help" ? @image-url("../assets/help.svg") : item.id == "upload" ? @image-url("../assets/upload.svg") : item.id == "radar" ? @image-url("../assets/radar.svg") : @image-url("../assets/gear.svg");
         colorize: root.selected || ta.pressed ? Theme.bg : Theme.fg;
     }
     Text {
@@ -392,6 +410,21 @@ export component AppWindow inherits Window {
         }
         if Backend.sel <= 1 { flick.content-y = 0; }
     }
+    function radar-move(d: int) {
+        if Backend.radar-items.length == 0 { return; }
+        Backend.radar-sel = max(0, min(Backend.radar-items.length - 1, Backend.radar-sel + d));
+        Backend.radar-select(Backend.radar-items[Backend.radar-sel].id);
+        root.radar-scroll();
+    }
+    function radar-scroll() {
+        let top = Backend.radar-sel * 30px;
+        if top < -rflick.content-y { rflick.content-y = -top; }
+        if top + 30px > -rflick.content-y + rflick.height {
+            rflick.content-y = -ceil((top + 30px - rflick.height) / 30px) * 30px;
+        }
+    }
+    property <int> radar-sel-mirror: Backend.radar-sel;
+    changed radar-sel-mirror => { root.radar-scroll(); }
     function home-move(d: int) {
         let i = Backend.sel + d;
         if i >= 0 && i < Backend.rows.length { Backend.sel = i; }
@@ -440,6 +473,17 @@ export component AppWindow inherits Window {
                 } else {
                     Backend.term-key(KeyMap.pc-key(e.text, e.modifiers.alt, e.modifiers.shift), e.modifiers.control);
                 }
+                return accept;
+            }
+            if Backend.radar {
+                if e.text == Key.UpArrow { root.radar-move(-1); }
+                else if e.text == Key.DownArrow || e.text == Key.Tab { root.radar-move(1); }
+                else if e.text == Key.PageUp { root.radar-move(-6); }
+                else if e.text == Key.PageDown { root.radar-move(6); }
+                else if e.text == Key.Return || e.text == " " || e.text == Key.RightArrow {
+                    if Backend.radar-items.length > 0 { Backend.radar-open(Backend.radar-items[Backend.radar-sel].id); }
+                }
+                else if e.text == Key.Escape || e.text == Key.Backspace || e.text == Key.LeftArrow { Backend.back(); }
                 return accept;
             }
             if Backend.home {
@@ -548,9 +592,92 @@ export component AppWindow inherits Window {
         }
     }
 
+    // ---- Bluetooth radar ----------------------------------------------
+    if Backend.radar: Rectangle {
+        x: 0; y: 24px; width: 260px; height: 216px;
+        // 4 x 4 tiles of 53 x 54 px, see radar.rs
+        for img[i] in Backend.radar-tiles: Image {
+            x: 24px + mod(i, 4) * 53px; y: floor(i / 4) * 54px; width: 53px; height: 54px;
+            source: img;
+            image-rendering: pixelated;
+        }
+        // compass numbers inside the outer ring
+        for t[i] in ["000", "090", "180", "270"]: Text {
+            property <float> s: i == 1 ? 1 : i == 3 ? -1 : 0;
+            property <float> c: i == 0 ? 1 : i == 2 ? -1 : 0;
+            x: 130px + s * 80px - self.preferred-width / 2;
+            y: 108px - c * 82px - self.preferred-height / 2;
+            text: t;
+            color: Theme.dim;
+            font-size: 9px;
+        }
+        // zone names, between the rings below the centre
+        for z[i] in [{ t: "NAH", r: 18 }, { t: "MITTEL", r: 42 }, { t: "FERN", r: 63 }, { t: "S.FERN", r: 83 }]: Text {
+            x: 130px + 0.26 * z.r * 1px + 3px;
+            y: 108px + 0.966 * z.r * 1px - self.preferred-height / 2;
+            text: z.t;
+            color: Theme.dim;
+            font-size: 8px;
+        }
+        if Backend.radar-note != "": Rectangle {
+            x: 130px - self.width / 2; y: 108px - self.height / 2;
+            width: note.preferred-width + 16px; height: note.preferred-height + 10px;
+            background: Theme.bg;
+            border-width: 1px; border-color: Theme.fg;
+            note := Text {
+                text: Backend.radar-note;
+                color: Theme.fg; font-size: Theme.font-small; font-weight: 700;
+                horizontal-alignment: center;
+            }
+        }
+        TouchArea {
+            clicked => {
+                root.refocus();
+                Backend.radar-tap(self.mouse-x / 1px, self.mouse-y / 1px);
+            }
+        }
+    }
+    Frame {
+        visible: Backend.radar;
+        x: 262px; y: 24px; width: parent.width - 264px; height: 216px;
+        title: Backend.radar-head;
+        rflick := Flickable {
+            x: 4px; y: 6px; width: parent.width - 8px; height: 204px;
+            content-height: Backend.radar-items.length * 30px;
+            for it[i] in Backend.radar-items: Rectangle {
+                y: i * 30px; height: 30px; width: parent.width;
+                property <bool> on: i == Backend.radar-sel;
+                background: on ? Theme.fg : transparent;
+                property <color> ink: on ? Theme.bg : it.fresh ? Theme.fg : Theme.dim;
+                Text {
+                    x: 4px; y: 2px; width: parent.width - 40px; height: 14px;
+                    text: it.name; overflow: elide;
+                    color: parent.ink; font-size: 12px; font-weight: 700;
+                }
+                Text {
+                    x: parent.width - 38px; y: 2px; width: 34px; height: 14px;
+                    text: it.rssi; horizontal-alignment: right;
+                    color: parent.ink; font-size: 12px; font-weight: 700;
+                }
+                Text {
+                    x: 4px; y: 16px; width: parent.width - 8px; height: 12px;
+                    text: it.info; overflow: elide;
+                    color: on ? Theme.bg : Theme.dim; font-size: 10px;
+                }
+                TouchArea {
+                    clicked => {
+                        Backend.radar-sel = i;
+                        root.refocus();
+                        Backend.radar-open(it.id);
+                    }
+                }
+            }
+        }
+    }
+
     // ---- list ---------------------------------------------------------
     Frame {
-        visible: !Backend.home && !Backend.term;
+        visible: !Backend.home && !Backend.term && !Backend.radar;
         x: 2px; y: 24px; width: parent.width - 4px; height: parent.height - 24px - 32px;
         list := Rectangle {
             // a whole number of rows, so no row is ever shown cut off
@@ -611,6 +738,7 @@ export component AppWindow inherits Window {
             overflow: elide;
             text: Backend.message != "" ? "» " + Backend.message
                 : Backend.home ? "◀▶ WAHL  ⏎ ÖFFNEN"
+                : Backend.radar ? "↑↓ WAHL  ⏎ DETAILS  ESC ZURÜCK"
                 : cur.kind == 2 ? "↑↓ WAHL  ◀▶ WERT  ESC ZURÜCK"
                 : cur.kind == 1 ? "↑↓ WAHL  ⏎ UMSCHALTEN  ESC ZURÜCK"
                 : cur.kind == 3 ? "↑↓ BLÄTTERN  ESC ZURÜCK"
