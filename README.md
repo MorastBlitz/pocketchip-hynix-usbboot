@@ -67,6 +67,7 @@ Ausführlich – bitte vorher lesen:
 | [08 Optimierung](docs/08-optimization.md) | Aufräumen, WLAN-Stabilität, Power-Taste, Startzeit |
 | [09 Boot-Logo](docs/09-boot-logo.md) | Logo nach ~10 s statt 38 s schwarz, Taste zeigt Startmeldungen |
 | [Touch-Oberfläche](ui/README.md) | Funktionen, Bauen unter macOS, Installation, Emulatoren |
+| [Kappe für die GPIO-Leiste](hardware/header-cap/README.md) | Druckteil mit UART- und I²C-Stecker, Verdrahtung (Entwurf) |
 
 ## Verzeichnisse
 
@@ -75,6 +76,7 @@ scripts/        Hilfsskripte (macOS)
 uboot-script/   U-Boot-Skript, das der NTC-U-Boot beim Flashen ausfuehrt
 rootfs/         Dateien fuer den PocketCHIP (WLAN-Waechter, Power-Taste, Boot-Logo)
 ui/             Touch-Oberflaeche (Rust/Slint) samt Emulator-Start, eigenes Install-Skript
+hardware/       Druckteile, z. B. Kappe mit UART- und I2C-Stecker fuer die GPIO-Leiste
 checksums/      SHA256 der NTC-Dateien
 docs/           Dokumentation
 firmware/       (nicht im Repo) heruntergeladene/extrahierte Binaerdateien
@@ -102,5 +104,6 @@ enthalten; die Skripte laden bzw. erzeugen sie aus den Originalquellen.
 
 ## Lizenz
 
-Skripte, Oberfläche und Dokumentation: [MIT](LICENSE). Die heruntergeladenen NTC-Bootloader
+Skripte, Oberfläche und Dokumentation: [MIT](LICENSE). Die Druckteile unter
+`hardware/` sind von CAD-Daten von Next Thing Co. abgeleitet und stehen unter CC BY-SA 3.0. Die heruntergeladenen NTC-Bootloader
 und U-Boot stehen unter der GPL-2.0 (Quellen: CHIP-u-boot bzw. U-Boot).
