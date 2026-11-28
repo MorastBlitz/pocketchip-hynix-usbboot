@@ -70,8 +70,52 @@ Die Konsolenwerkzeuge `pocketchip-connect`, `pocketchip-control` und
 ## Sicherheitsupdates
 
 ```sh
-sudo apt-get update && sudo apt-get upgrade
+sudo apt-get update && sudo apt-get upgrade --with-new-pkgs
 ```
+
+Alternativ in der Touch-Oberfläche unter EINSTELLUNGEN › UPDATE.
+`--with-new-pkgs` ist nötig, damit ein Kernel mit neuer ABI-Nummer (neues Paket
+`linux-image-<version>-armmp`) nicht zurückgehalten wird.
+
+### Neue Kernel automatisch eintragen
+
+Mainline U-Boot startet, was in `/boot/extlinux/extlinux.conf` steht. Dort steht
+die Kernelversion fest im Dateinamen. Debian bringt für den PocketCHIP kein
+`u-boot-menu` mit. Ein neuer Kernel würde also installiert, aber nie gestartet.
+
+Das übernimmt [`pocketchip-update-extlinux`](../rootfs/usr/local/sbin/pocketchip-update-extlinux).
+Die Hooks `/etc/kernel/postinst.d/zz-pocketchip-extlinux` und
+`/etc/kernel/postrm.d/zz-pocketchip-extlinux` rufen es nach jeder Installation
+und Entfernung eines Kernels auf. Dann:
+
+- baut es das Rückfall-initramfs `initrd.img-<version>.most` (`MODULES=most`, ~1,5 min),
+- schreibt es `extlinux.conf` neu (alte Datei als `extlinux.conf.bak`),
+- löscht es die `.most`/`.orig`-Dateien von Kerneln, die nicht mehr installiert sind.
+
+| Eintrag | Kernel | initramfs |
+|---|---|---|
+| `debian` (Standard) | neuester | `initrd.img-<v>` (`MODULES=dep`, mit Logo) |
+| `most` | neuester | `initrd.img-<v>.most` |
+| `orig` | neuester | `initrd.img-<v>.orig`, nur wenn von Hand angelegt ([09](09-boot-logo.md)) |
+| `previous` | vorheriger, solange installiert | `initrd.img-<v>` |
+
+Die Einträge wählt man über die serielle Konsole im Menü von U-Boot. Startet ein
+neuer Kernel nicht, kommt man so mit `previous` zurück. Kernel-Parameter,
+Devicetree und Timeout stehen oben im Skript und lassen sich in
+`/etc/default/pocketchip-extlinux` überschreiben (`APPEND_BASE`, `APPEND_EXTRA`,
+`FDT`, `TIMEOUT`, `BUILD_MOST=0`). Direkte Änderungen an `extlinux.conf` gehen
+beim nächsten Kernel-Update verloren.
+
+```sh
+sudo install -m 755 rootfs/usr/local/sbin/pocketchip-update-extlinux /usr/local/sbin/
+sudo install -m 755 rootfs/etc/kernel/postinst.d/zz-pocketchip-extlinux /etc/kernel/postinst.d/
+sudo install -m 755 rootfs/etc/kernel/postrm.d/zz-pocketchip-extlinux /etc/kernel/postrm.d/
+sudo pocketchip-update-extlinux --print          # Vorschau, schreibt nichts
+sudo pocketchip-update-extlinux --build-most "$(uname -r)"
+```
+
+Den Devicetree (`sun5i-r8-pocketchip.dtb`) bringt Debians Kernelpaket nicht mit.
+Er stammt aus dem PocketTRIX-Image und bleibt bei Kernel-Updates unverändert.
 
 ## Entfernte Pakete
 
@@ -162,6 +206,10 @@ Ersatzeintrag behalten:
 sudo cp /boot/initrd.img-$(uname -r) /boot/initrd.img-$(uname -r).most
 # + LABEL most ... INITRD /boot/initrd.img-<version>.most in extlinux.conf
 ```
+
+Mit dem Kernel-Hook ([Neue Kernel automatisch eintragen](#neue-kernel-automatisch-eintragen))
+entsteht das `.most`-initramfs bei jedem Kernel-Update automatisch, und der
+Eintrag steht in `extlinux.conf`. `TIMEOUT 5` setzt der Hook ebenfalls.
 
 Der verbleibende Großteil ist systemd selbst auf dem 1-GHz-Einkern-R8
 (`basic.target` erst ~14 s nach dem Wechsel ins Root-Dateisystem) und die

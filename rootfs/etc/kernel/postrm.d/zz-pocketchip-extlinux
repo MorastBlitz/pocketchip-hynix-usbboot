@@ -1,0 +1,6 @@
+#!/bin/sh
+# Nach dem Entfernen eines Kernels: extlinux.conf ohne ihn neu schreiben und
+# seine Rueckfall-initramfs loeschen.
+set -e
+[ -x /usr/local/sbin/pocketchip-update-extlinux ] || exit 0
+exec /usr/local/sbin/pocketchip-update-extlinux

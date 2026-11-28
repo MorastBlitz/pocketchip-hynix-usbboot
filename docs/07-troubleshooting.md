@@ -20,4 +20,5 @@
 | Nach Treiber-Neuladen nur noch `Authentication … timed out` | Chip hängt weiter → SDIO-Controller neu binden (pwrseq-Reset), `pocketchip-wifi-watchdog --reset-now` ([08](08-optimization.md#wlan-stabilisieren)) |
 | Display beim Start ~38 s schwarz | Display-Treiber erst am Ende geladen → [09](09-boot-logo.md) (`sun4i_backend` ins initramfs, `fw_devlink=permissive`) |
 | Nach Splash-Einbau startet die Oberfläche nicht | `Conflicts=` zwischen Splash und Oberfläche → Drop-in statt Conflicts ([09](09-boot-logo.md#stolpersteine)) |
+| Nach Kernel-Update startet das System nicht | Über die serielle Konsole im U-Boot-Menü `previous` oder `most` wählen ([08](08-optimization.md#neue-kernel-automatisch-eintragen)); die alte Datei liegt als `extlinux.conf.bak` daneben |
 | Gar nichts startet mehr | FEL-Pin an GND → FEL-Modus ist immer erreichbar → per FEL starten oder Bootloader neu schreiben |

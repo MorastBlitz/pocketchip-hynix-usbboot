@@ -50,7 +50,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable pocketchip-bootsplash.service
 ```
 
-In `/boot/extlinux/extlinux.conf` an die `APPEND`-Zeile anhängen:
+In `/boot/extlinux/extlinux.conf` an die `APPEND`-Zeile anhängen. Mit dem
+Kernel-Hook aus [08](08-optimization.md#neue-kernel-automatisch-eintragen) ist das
+schon Vorgabe (`APPEND_EXTRA`), und der Hook trägt `orig` selbst ein, sobald
+`initrd.img-<version>.orig` existiert:
 
 ```
 vt.global_cursor_default=0 fw_devlink=permissive

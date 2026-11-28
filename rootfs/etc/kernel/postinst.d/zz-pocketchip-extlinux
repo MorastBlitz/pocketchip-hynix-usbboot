@@ -1,0 +1,12 @@
+#!/bin/sh
+# Nach der Installation eines Kernels: Rueckfall-initramfs (MODULES=most) bauen
+# und extlinux.conf auf den neuesten Kernel umstellen. Laeuft nach dem Hook
+# initramfs-tools, der das normale initrd.img-<version> erzeugt.
+set -e
+version="$1"
+[ -x /usr/local/sbin/pocketchip-update-extlinux ] || exit 0
+if [ -n "${DEB_MAINT_PARAMS:-}" ]; then
+  eval set -- "$DEB_MAINT_PARAMS"
+  [ "${1:-}" = configure ] || exit 0
+fi
+exec /usr/local/sbin/pocketchip-update-extlinux --build-most "$version"

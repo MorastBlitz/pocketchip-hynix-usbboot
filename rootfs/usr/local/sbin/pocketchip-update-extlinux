@@ -1,0 +1,131 @@
+#!/bin/sh
+# Schreibt /boot/extlinux/extlinux.conf passend zu den installierten Kerneln neu.
+#
+# Mainline U-Boot liest extlinux.conf vom USB-Stick. Ohne u-boot-menu steht dort
+# eine feste Kernelversion, und ein neuer Kernel (neue ABI) wuerde installiert,
+# aber nie gestartet. Dieses Skript laeuft deshalb nach jeder Kernel-Installation
+# und -Entfernung (/etc/kernel/postinst.d und postrm.d, zz-pocketchip-extlinux).
+#
+# Eintraege:
+#   debian    neuester Kernel, normales initramfs (MODULES=dep), Standard
+#   most      neuester Kernel, grosses initramfs (MODULES=most), Rueckfall
+#   orig      neuester Kernel, initrd.img-<v>.orig, falls vorhanden (von Hand)
+#   previous  vorheriger Kernel, falls noch installiert
+#
+#   pocketchip-update-extlinux                 Datei neu schreiben
+#   pocketchip-update-extlinux --print         nur ausgeben, nichts schreiben
+#   pocketchip-update-extlinux --build-most V  vorher initrd.img-V.most bauen
+#
+# Einstellungen (optional): /etc/default/pocketchip-extlinux
+set -eu
+
+APPEND_BASE="console=ttyS0,115200 root=LABEL=pocketroot rootwait rw loglevel=4"
+APPEND_EXTRA="vt.global_cursor_default=0 fw_devlink=permissive"
+FDT=/boot/sun5i-r8-pocketchip.dtb
+TIMEOUT=5
+BUILD_MOST=1
+[ -r /etc/default/pocketchip-extlinux ] && . /etc/default/pocketchip-extlinux
+
+BOOT=${POCKETCHIP_BOOT:-/boot}   # fuer Tests ueberschreibbar
+CONF=$BOOT/extlinux/extlinux.conf
+print=0
+most_for=
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --print) print=1 ;;
+    --build-most) most_for="$2"; shift ;;
+    *) echo "unbekannte Option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+log() { echo "pocketchip-update-extlinux: $*" >&2; }
+
+build_most() {
+  v="$1"
+  [ "$BUILD_MOST" = 1 ] || return 0
+  [ -e "$BOOT/vmlinuz-$v" ] || return 0
+  command -v mkinitramfs >/dev/null 2>&1 || return 0
+  tmp=$(mktemp -d)
+  cp -a /etc/initramfs-tools/. "$tmp/"
+  sed -i 's/^MODULES=.*/MODULES=most/' "$tmp/initramfs.conf"
+  log "baue $BOOT/initrd.img-$v.most (MODULES=most) ..."
+  if mkinitramfs -d "$tmp" -o "$BOOT/initrd.img-$v.most.new" "$v"; then
+    mv "$BOOT/initrd.img-$v.most.new" "$BOOT/initrd.img-$v.most"
+  else
+    rm -f "$BOOT/initrd.img-$v.most.new"
+    log "WARNUNG: initrd.img-$v.most konnte nicht gebaut werden"
+  fi
+  rm -rf "$tmp"
+}
+
+# Rueckfall-initramfs von Kerneln entfernen, die nicht mehr installiert sind.
+for f in "$BOOT"/initrd.img-*.most "$BOOT"/initrd.img-*.orig; do
+  [ -e "$f" ] || continue
+  v=${f#"$BOOT"/initrd.img-}
+  v=${v%.most}
+  v=${v%.orig}
+  if [ ! -e "$BOOT/vmlinuz-$v" ] && [ "$print" = 0 ]; then
+    log "entferne $f (Kernel $v nicht mehr installiert)"
+    rm -f "$f"
+  fi
+done
+
+[ -n "$most_for" ] && [ "$print" = 0 ] && build_most "$most_for"
+
+# Installierte Kernel mit passendem initramfs, neueste zuerst.
+versions=$(for k in "$BOOT"/vmlinuz-*; do
+  [ -e "$k" ] || continue
+  v=${k#"$BOOT"/vmlinuz-}
+  [ -e "$BOOT/initrd.img-$v" ] && echo "$v"
+done | sort -V -r)
+
+newest=$(echo "$versions" | sed -n 1p)
+previous=$(echo "$versions" | sed -n 2p)
+
+if [ -z "$newest" ]; then
+  log "kein Kernel mit initramfs in $BOOT gefunden, extlinux.conf bleibt unveraendert"
+  exit 0
+fi
+if [ ! -e "$FDT" ]; then
+  log "Devicetree $FDT fehlt, extlinux.conf bleibt unveraendert"
+  exit 0
+fi
+
+entry() { # label, menu, version, initrd, append
+  printf '\nLABEL %s\n  MENU LABEL %s\n  LINUX %s/vmlinuz-%s\n  INITRD %s\n  FDT %s\n  APPEND %s\n' \
+    "$1" "$2" "$BOOT" "$3" "$4" "$FDT" "$5"
+}
+
+generate() {
+  echo "# Erzeugt von pocketchip-update-extlinux – Aenderungen hier gehen beim"
+  echo "# naechsten Kernel-Update verloren. Einstellungen: /etc/default/pocketchip-extlinux"
+  echo "DEFAULT debian"
+  echo "TIMEOUT $TIMEOUT"
+  echo "PROMPT 1"
+  entry debian "Debian PocketCHIP $newest" "$newest" "$BOOT/initrd.img-$newest" "$APPEND_BASE $APPEND_EXTRA"
+  [ -e "$BOOT/initrd.img-$newest.most" ] &&
+    entry most "Debian PocketCHIP $newest (grosses initramfs MODULES=most)" "$newest" "$BOOT/initrd.img-$newest.most" "$APPEND_BASE $APPEND_EXTRA"
+  [ -e "$BOOT/initrd.img-$newest.orig" ] &&
+    entry orig "Debian PocketCHIP $newest (altes initramfs, ohne Logo)" "$newest" "$BOOT/initrd.img-$newest.orig" "$APPEND_BASE"
+  [ -n "$previous" ] &&
+    entry previous "Debian PocketCHIP $previous (vorheriger Kernel)" "$previous" "$BOOT/initrd.img-$previous" "$APPEND_BASE $APPEND_EXTRA"
+  return 0
+}
+
+if [ "$print" = 1 ]; then
+  generate
+  exit 0
+fi
+
+mkdir -p "$BOOT/extlinux"
+generate > "$CONF.new"
+if [ -e "$CONF" ] && cmp -s "$CONF" "$CONF.new"; then
+  rm -f "$CONF.new"
+  exit 0
+fi
+[ -e "$CONF" ] && cp -p "$CONF" "$CONF.bak"
+mv "$CONF.new" "$CONF"
+sync
+log "extlinux.conf: Standard ist jetzt $newest${previous:+, Rueckfall $previous} (alte Datei: $CONF.bak)"
