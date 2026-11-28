@@ -35,6 +35,7 @@ enum Page {
     Time,
     Emus,
     Term,
+    Help,
     /// Pause menu over a running emulator (`--overlay LABEL`).
     Overlay(String),
     TzRegion,
@@ -57,6 +58,7 @@ impl Page {
             Page::Time => "DATUM / ZEIT".into(),
             Page::Emus => "EMULATOREN".into(),
             Page::Term => "TERMINAL".into(),
+            Page::Help => "HILFE".into(),
             Page::Overlay(l) => format!("PAUSE / {l}"),
             Page::TzRegion => "ZEITZONE".into(),
             Page::TzCity(r) => format!("ZEITZONE / {}", r.to_uppercase()),
@@ -84,6 +86,65 @@ fn info(label: &str, value: &str) -> Row {
 }
 fn sep(label: &str) -> Row {
     row("", label, "", 4, false)
+}
+
+/// Keyboard and touch reference shown on the HILFE page.
+fn help_rows() -> Vec<Row> {
+    let mut v = vec![sep("KONSOLE")];
+    for (k, d) in [
+        ("↑ ↓", "AUSWAHL"),
+        ("◀ ▶", "WERT / KACHEL"),
+        ("ENTER", "ÖFFNEN / UMSCHALTEN"),
+        ("ESC", "ZURÜCK"),
+        ("STATUSZEILE TIPPEN", "ZURÜCK"),
+        ("POWER-TASTE", "AUSSCHALT-DIALOG"),
+        ("POWER 6 S HALTEN", "HARTES AUS"),
+    ] {
+        v.push(info(k, d));
+    }
+    v.push(sep("FN-TASTE + ..."));
+    for (k, d) in [
+        ("FN + Y / U", "{  }"),
+        ("FN + I / O", "[  ]"),
+        ("FN + P", "|"),
+        ("FN + H / J", "<  >"),
+        ("FN + K / L", "'  \""),
+        ("FN + B", "`"),
+        ("FN + N", "~"),
+        ("FN + M", ":"),
+        ("FN + .", ";"),
+        ("FN + /", "\\"),
+        ("FN + ⌫", "ENTF"),
+        ("FN + ▲ / ▼", "BILD AUF / AB"),
+        ("FN + ◀ / ▶", "POS1 / ENDE"),
+    ] {
+        v.push(info(k, d));
+    }
+    v.push(sep("SHIFT + ..."));
+    for (k, d) in [
+        ("SHIFT + 1 ... 0", "! @ # $ % ^ & * ( )"),
+        ("SHIFT + .", ","),
+        ("SHIFT + +", "="),
+        ("SHIFT + -", "_"),
+        ("SHIFT + /", "?"),
+    ] {
+        v.push(info(k, d));
+    }
+    v.push(sep("TERMINAL"));
+    for (k, d) in [
+        ("LEISTE UNTEN", "ESC TAB CTRL ▲ ▼"),
+        ("CTRL (LEISTE)", "FÜR NÄCHSTE TASTE"),
+        ("SHIFT+FN+▲ / ▼", "VERLAUF BLÄTTERN"),
+        ("FINGER ZIEHEN", "VERLAUF BLÄTTERN"),
+        ("CTRL + C", "ABBRECHEN"),
+        ("CTRL + D", "SHELL BEENDEN"),
+        ("CTRL + P", "PROMPT 1 / 2 ZEILEN"),
+        ("◀ ZURÜCK", "MENÜ, SHELL LÄUFT"),
+        ("SCHRIFT", "ANZEIGE › TERMINAL"),
+    ] {
+        v.push(info(k, d));
+    }
+    v
 }
 
 /// Emulators started full screen by pocketchip-emu@<id>.service:
@@ -240,6 +301,7 @@ impl App {
         be.set_depth((self.stack.len() - 1) as i32);
         be.set_home(page == Page::Home);
         be.set_term(page == Page::Term);
+        be.set_plain(page == Page::Help);
         if self.rows.row_count() == rows.len() {
             for (i, r) in rows.iter().enumerate() {
                 if self.rows.row_data(i).as_ref() != Some(r) {
@@ -287,8 +349,10 @@ impl App {
                 action("settings", "EINSTELLUNGEN", ""),
                 action("term", "TERMINAL", ""),
                 action("emus", "EMULATOREN", ""),
+                action("help", "HILFE", ""),
             ],
             Page::Term => Vec::new(),
+            Page::Help => help_rows(),
             Page::Emus => self.rows_emus(),
             Page::Overlay(l) => self.rows_overlay(l),
             Page::Menu => self.rows_menu(),
@@ -766,6 +830,7 @@ impl App {
             (Page::Home, "settings") => self.push(Page::Menu),
             (Page::Home, "emus") => self.push(Page::Emus),
             (Page::Home, "term") => self.push(Page::Term),
+            (Page::Home, "help") => self.push(Page::Help),
             (Page::Overlay(_), "resume") => self.overlay_exit(0),
             (Page::Overlay(l), "quit_emu") => {
                 let text = format!("{l} BEENDEN? NICHT GESPEICHERTER SPIELSTAND GEHT VERLOREN.");

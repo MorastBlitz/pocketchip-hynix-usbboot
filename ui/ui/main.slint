@@ -182,6 +182,8 @@ export global Backend {
     in property <bool> home: false;
     // built-in terminal
     in property <bool> term: false;
+    // pages with a lot of small text are shown without scanlines
+    in property <bool> plain: false;
     in property <[TermSeg]> term-segs;
     in property <bool> term-ctrl: false;
     // terminal grid, set by Rust (DejaVu Sans Mono advance = 0.602 em)
@@ -246,7 +248,7 @@ component HomeTile inherits Rectangle {
         x: (parent.width - self.width) / 2;
         width: 52px;
         height: 52px;
-        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : item.id == "term" ? @image-url("../assets/terminal.svg") : @image-url("../assets/gear.svg");
+        source: item.id == "emus" ? @image-url("../assets/gamepad.svg") : item.id == "term" ? @image-url("../assets/terminal.svg") : item.id == "help" ? @image-url("../assets/help.svg") : @image-url("../assets/gear.svg");
         colorize: root.selected || ta.pressed ? Theme.bg : Theme.fg;
     }
     Text {
@@ -380,11 +382,14 @@ export component AppWindow inherits Window {
         root.scroll-to-sel();
     }
     function scroll-to-sel() {
-        // rows above the selection (separators are shorter)
+        // all rows have the same height; scroll in whole rows so the top
+        // row is never cut off
         let top = Backend.sel * Theme.row-h;
         let bottom = top + Theme.row-h;
-        if top < -flick.content-y { flick.content-y = -top + (Backend.sel <= 1 ? 0px : 0px); }
-        if bottom > -flick.content-y + flick.height { flick.content-y = flick.height - bottom; }
+        if top < -flick.content-y { flick.content-y = -top; }
+        if bottom > -flick.content-y + flick.height {
+            flick.content-y = -ceil((bottom - flick.height) / Theme.row-h) * Theme.row-h;
+        }
         if Backend.sel <= 1 { flick.content-y = 0; }
     }
     function home-move(d: int) {
@@ -547,7 +552,9 @@ export component AppWindow inherits Window {
         visible: !Backend.home && !Backend.term;
         x: 2px; y: 24px; width: parent.width - 4px; height: parent.height - 24px - 32px;
         list := Rectangle {
-            x: 5px; y: 5px; width: parent.width - 10px - 8px; height: parent.height - 10px;
+            // a whole number of rows, so no row is ever shown cut off
+            x: 5px; y: 5px; width: parent.width - 10px - 8px;
+            height: floor((parent.height - 10px) / Theme.row-h) * Theme.row-h;
             flick := Flickable {
                 content-height: max(self.height, rowsbox.preferred-height);
                 rowsbox := VerticalLayout {
@@ -630,7 +637,7 @@ export component AppWindow inherits Window {
 
     // static, subtle scanlines
     // not over the terminal: small text is hard to read through them
-    if Backend.scanlines && !Backend.term: Image {
+    if Backend.scanlines && !Backend.term && !Backend.plain: Image {
         x: 0; y: 0; width: parent.width; height: parent.height;
         source: @image-url("../assets/scanline.png");
         horizontal-tiling: repeat;
